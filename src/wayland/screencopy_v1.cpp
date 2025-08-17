@@ -7,16 +7,7 @@
 #include "screencopy_v1.h"
 #include "display.h"
 #include "output.h"
-#include "shmclientbuffer_p.h"  // Use the private header that contains ShmClientBuffer class
 #include "core/output.h"
-#include "core/renderloop.h"
-#include "core/graphicsbuffer.h"  // For GraphicsBuffer::Read and Write flags
-#include "opengl/gltexture.h"
-#include "workspace.h"
-#include "compositor.h"
-
-// Reuse the texture grabbing utilities from the screencast plugin
-#include "../plugins/screencast/screencastutils.h"
 
 #include <QPointer>
 #include <QImage>
@@ -64,8 +55,6 @@ public:
     QRect region;
     bool includeCursor = false;
     bool waitForDamage = false;
-
-    void performCopy(wl_resource *buffer, bool withDamage);
 
 protected:
     void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override;
@@ -146,54 +135,6 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
     framePrivate->send_failed();
 }
 
-void ScreencopyFrameV1InterfacePrivate::performCopy(wl_resource *buffer_resource, bool withDamage)
-{
-    auto *clientBuffer = ShmClientBuffer::get(buffer_resource);
-    if (!clientBuffer) {
-        send_failed();
-        return;
-    }
-
-    // Get the texture for the output
-    auto [texture, color] = Compositor::self()->textureForOutput(output->handle());
-    if (!texture) {
-        send_failed();
-        return;
-    }
-
-    // Map the client buffer to get direct access to its memory
-    auto mapping = clientBuffer->map(GraphicsBuffer::Read | GraphicsBuffer::Write);
-    if (!mapping.data) {
-        clientBuffer->unmap();
-        send_failed();
-        return;
-    }
-
-    // Create a QImage wrapper around the client's buffer (no copy!)
-    QImage targetImage(static_cast<uchar*>(mapping.data), 
-                       clientBuffer->size().width(), 
-                       clientBuffer->size().height(),
-                       static_cast<qsizetype>(mapping.stride),
-                       QImage::Format_ARGB32_Premultiplied);
-
-    // Single copy: GPU texture directly to client buffer via QImage wrapper
-    grabTexture(texture.get(), &targetImage);
-
-    // Unmap the buffer
-    clientBuffer->unmap();
-
-    // Send completion events
-    send_flags(ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT);
-    
-    // Send timestamp using the output's presentation timestamp
-    auto timestamp = output->handle()->renderLoop()->lastPresentationTimestamp();
-    uint64_t tv_sec = std::chrono::duration_cast<std::chrono::seconds>(timestamp).count();
-    uint32_t tv_sec_hi = tv_sec >> 32;
-    uint32_t tv_sec_lo = tv_sec & 0xFFFFFFFF;
-    uint32_t tv_nsec = (timestamp % std::chrono::seconds(1)).count();
-    send_ready(tv_sec_hi, tv_sec_lo, tv_nsec);
-}
-
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_destroy(Resource *resource)
 {
     wl_resource_destroy(resource->handle);
@@ -213,13 +154,11 @@ void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy_resourc
 void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_copy(Resource *resource, wl_resource *buffer)
 {
     Q_EMIT q->copyRequested(buffer, false);
-    performCopy(buffer, false);
 }
 
 void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, wl_resource *buffer)
 {
     Q_EMIT q->copyRequested(buffer, true);
-    performCopy(buffer, true);
 }
 
 void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy(Resource *resource)

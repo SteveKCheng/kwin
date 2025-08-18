@@ -18,6 +18,7 @@
 #include "../screencast/screencastutils.h"
 
 #include <QImage>
+#include <QObject>
 #include <chrono>
 #include <drm_fourcc.h>
 
@@ -27,7 +28,7 @@
 namespace KWin
 {
 
-static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, bool withDamage)
+static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource)
 {
     auto *clientBuffer = ShmClientBuffer::get(buffer_resource);
     if (!clientBuffer) {
@@ -90,8 +91,23 @@ void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
 {
     // Connect to the copy request signal to handle actual copying
     connect(frame, &ScreencopyFrameV1Interface::copyRequested,
-            this, [frame](wl_resource *buffer, bool withDamage) {
-                performCopy(frame, buffer, withDamage);
+            this, [this, frame](wl_resource *buffer, bool withDamage) {
+                if (withDamage) {
+                    // For copy_with_damage, only set up damage tracking - don't copy immediately
+                    connect(frame->output()->handle(), &Output::outputChange,
+                            frame, [frame, buffer](const QRegion &damage) {
+                                // Send damage events for each damaged rectangle
+                                for (const QRect &rect : damage) {
+                                    frame->sendDamage(rect.x(), rect.y(), rect.width(), rect.height());
+                                }
+                                                
+                                // Now perform the copy
+                                performCopy(frame, buffer);
+                            }, Qt::UniqueConnection);
+                } else {
+                    // For regular copy, do immediate copy
+                    performCopy(frame, buffer);
+                }
             });
 }
 

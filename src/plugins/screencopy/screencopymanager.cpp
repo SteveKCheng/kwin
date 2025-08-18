@@ -162,38 +162,130 @@ ScreencopyManager::~ScreencopyManager()
 
 void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
 {
+    // Set up tracking for frame destruction
+    connect(frame, &ScreencopyFrameV1Interface::destroyed,
+            this, [this, frame]() {
+                handleFrameDestroyed(frame);
+            });
+    
     // Connect to the copy request signal to handle actual copying
     connect(frame, &ScreencopyFrameV1Interface::copyRequested,
             this, [this, frame](wl_resource *buffer, bool withDamage) {
                 if (withDamage) {
-                    // For copy_with_damage, only set up damage tracking - don't copy immediately
-                    // Use SingleShotConnection to automatically disconnect after first damage event
-                    connect(frame->output()->handle(), &Output::outputChange,
-                            frame, [frame, buffer](const QRegion &damage) {
-                                // Compute bounding rectangle of all damage
-                                QRect boundingRect = damage.boundingRect();
-                                
-                                // Send single "damage" event for the bounding rectangle.
-                                // The spec says this "damage" event occurs "immediately before"
-                                // the final "ready" event.  Taken literally, the spec
-                                // is ambiguous as to whether the client buffer is updated before
-                                // the "damage" event is received, but arguably it is okay
-                                // to update the buffer after, as long as all updates occur
-                                // before the "ready" event.  Using this interpretation saves
-                                // us from having to split the performCopyRegion into two parts,
-                                // the first part to copy the buffer and the second part to
-                                // mark the frame as ready.
-                                frame->sendDamage(boundingRect.x(), boundingRect.y(),
-                                                 boundingRect.width(), boundingRect.height());
-
-                                // Perform optimized copy of just the bounding rectangle
-                                performCopyRegion(frame, buffer, &boundingRect);
-                            }, Qt::SingleShotConnection);
+                    // Set up output tracking if not already done
+                    setupOutputTracking(frame->output());
+                    
+                    Output *output = frame->output()->handle();
+                    OutputState &state = m_outputStates[output];
+                    
+                    // Store the frame and buffer for later processing
+                    frame->setProperty("buffer", QVariant::fromValue(reinterpret_cast<qintptr>(buffer)));
+                    state.pendingFrames.append(QPointer<ScreencopyFrameV1Interface>(frame));
+                    
+                    // If we already have accumulated damage, process it immediately
+                    if (!state.accumulatedDamage.isEmpty()) {
+                        processFramesForOutput(output);
+                    }
+                    // If no accumulated damage, the frame will be processed when next damage occurs
                 } else {
                     // For regular copy, do immediate copy
                     performCopy(frame, buffer);
                 }
             });
+}
+
+void ScreencopyManager::setupOutputTracking(OutputInterface *outputInterface)
+{
+    Output *output = outputInterface->handle();
+    if (!output || m_outputStates[output].connected) {
+        return; // Already connected or invalid output
+    }
+    
+    // Connect to output change signals - this connection persists for the lifetime of the plugin
+    connect(output, &Output::outputChange,
+            this, [this, output](const QRegion &damage) {
+                handleOutputChange(output, damage);
+            });
+    
+    m_outputStates[output].connected = true;
+}
+
+void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damage)
+{
+    if (!m_outputStates.contains(output)) {
+        return; // No state for this output
+    }
+    
+    OutputState &state = m_outputStates[output];
+    
+    // Scale damage from logical to physical coordinates
+    // Output::outputChange signal provides damage in logical coordinates
+    // but we need physical coordinates for the screencopy buffers
+    QRegion scaledDamage = scaleRegion(damage, output->scale());
+    
+    // Accumulate damage since last ready event
+    state.accumulatedDamage = state.accumulatedDamage.united(scaledDamage);
+    
+    // Process all pending frames for this output
+    if (!state.pendingFrames.isEmpty()) {
+        processFramesForOutput(output);
+    }
+}
+
+void ScreencopyManager::processFramesForOutput(Output *output)
+{
+    if (!m_outputStates.contains(output)) {
+        return;
+    }
+
+    OutputState &state = m_outputStates[output];
+    QRect boundingRect = state.accumulatedDamage.boundingRect();
+
+    if (boundingRect.isEmpty())
+        return;
+
+    // Process all pending frames
+    auto it = state.pendingFrames.begin();
+    while (it != state.pendingFrames.end()) {
+        QPointer<ScreencopyFrameV1Interface> frame = *it;
+        if (!frame) {
+            // Frame was destroyed, remove from list
+            it = state.pendingFrames.erase(it);
+            continue;
+        }
+        
+        // Get the buffer that was stored when the frame was requested
+        QVariant bufferVariant = frame->property("buffer");
+        if (!bufferVariant.isValid()) {
+            // No buffer stored, skip this frame
+            ++it;
+            continue;
+        }
+        
+        auto *buffer = reinterpret_cast<wl_resource*>(bufferVariant.value<qintptr>());
+        
+        // Send damage event for the bounding rectangle
+        frame->sendDamage(boundingRect.x(), boundingRect.y(),
+                         boundingRect.width(), boundingRect.height());
+        
+        // Perform the copy with the accumulated damage region
+        // Using the boundingRect of the damage for efficiency
+        performCopyRegion(frame.data(), buffer, &boundingRect);
+
+        // Remove processed frame from pending list
+        it = state.pendingFrames.erase(it);
+    }
+    
+    // Clear accumulated damage since we've processed all frames
+    state.accumulatedDamage = QRegion();
+}
+
+void ScreencopyManager::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
+{
+    // Remove the frame from all pending frame lists
+    for (auto &state : m_outputStates) {
+        state.pendingFrames.removeAll(QPointer<ScreencopyFrameV1Interface>(frame));
+    }
 }
 
 } // namespace KWin

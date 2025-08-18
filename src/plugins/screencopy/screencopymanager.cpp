@@ -31,7 +31,7 @@ namespace KWin
 {
 
 // Forward declaration
-static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect &region);
+static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect *region);
 
 // Helper function to grab a rectangular region from a texture
 static void grabTextureRegion(GLTexture *texture, QImage *target, const QRect &region)
@@ -73,10 +73,10 @@ static void grabTextureRegion(GLTexture *texture, QImage *target, const QRect &r
 
 static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource)
 {
-    performCopyRegion(frame, buffer_resource, QRect()); // Empty rect means full copy
+    performCopyRegion(frame, buffer_resource, nullptr);
 }
 
-static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect &region)
+static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect *region)
 {
     auto *clientBuffer = ShmClientBuffer::get(buffer_resource);
     if (!clientBuffer) {
@@ -92,7 +92,9 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
     }
 
     const QSize bufferSize = clientBuffer->size();
-    const QRect copyRegion = region.isEmpty() ? QRect(0, 0, bufferSize.width(), bufferSize.height()) : region;
+    const QRect copyRegion = region != nullptr
+                                ? *region
+                                : QRect(0, 0, bufferSize.width(), bufferSize.height());
     
     // Map the client buffer to get direct access to its memory
     auto mapping = clientBuffer->map(GraphicsBuffer::Read | GraphicsBuffer::Write);
@@ -131,7 +133,7 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
 
     // Send completion events - no Y_INVERT flag needed since grabTexture handles it
     frame->sendFlags(0);
-    
+
     // Send timestamp using the output's presentation timestamp
     auto timestamp = frame->output()->handle()->renderLoop()->lastPresentationTimestamp();
     frame->sendReady(timestamp);
@@ -158,21 +160,28 @@ void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
             this, [this, frame](wl_resource *buffer, bool withDamage) {
                 if (withDamage) {
                     // For copy_with_damage, only set up damage tracking - don't copy immediately
+                    // Use SingleShotConnection to automatically disconnect after first damage event
                     connect(frame->output()->handle(), &Output::outputChange,
                             frame, [frame, buffer](const QRegion &damage) {
                                 // Compute bounding rectangle of all damage
                                 QRect boundingRect = damage.boundingRect();
-                                if (boundingRect.isEmpty()) {
-                                    return; // No damage, no copy needed
-                                }
                                 
-                                // Send single damage event for the bounding rectangle
-                                frame->sendDamage(boundingRect.x(), boundingRect.y(), 
+                                // Send single "damage" event for the bounding rectangle.
+                                // The spec says this "damage" event occurs "immediately before"
+                                // the final "ready" event.  Taken literally, the spec
+                                // is ambiguous as to whether the client buffer is updated before
+                                // the "damage" event is received, but arguably it is okay
+                                // to update the buffer after, as long as all updates occur
+                                // before the "ready" event.  Using this interpretation saves
+                                // us from having to split the performCopyRegion into two parts,
+                                // the first part to copy the buffer and the second part to
+                                // mark the frame as ready.
+                                frame->sendDamage(boundingRect.x(), boundingRect.y(),
                                                  boundingRect.width(), boundingRect.height());
-                                                
+
                                 // Perform optimized copy of just the bounding rectangle
-                                performCopyRegion(frame, buffer, boundingRect);
-                            }, Qt::UniqueConnection);
+                                performCopyRegion(frame, buffer, &boundingRect);
+                            }, Qt::SingleShotConnection);
                 } else {
                     // For regular copy, do immediate copy
                     performCopy(frame, buffer);

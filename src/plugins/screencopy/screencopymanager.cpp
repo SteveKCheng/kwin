@@ -45,22 +45,30 @@ static void grabTextureRegion(GLTexture *texture, QImage *target, const QRect &r
         glPixelStorei(GL_PACK_INVERT_MESA, GL_TRUE);
     }
 
+    GLint oldRowLength;
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &oldRowLength);
+    glPixelStorei(GL_PACK_ROW_LENGTH,target->bytesPerLine() / 4);
+
     texture->bind();
-    if (context->isOpenGLES() || context->glPlatform()->driver() == Driver_NVidia) {
+
+    {
+        // Bind a framebuffer to texture, then read the desired region
+        // from the framebuffer.
         GLFramebuffer fbo(texture);
         GLFramebuffer::pushFramebuffer(&fbo);
         // Read only the specified region
-        context->glReadnPixels(region.x(), region.y(), region.width(), region.height(), 
-                              GL_BGRA, GL_UNSIGNED_BYTE, target->sizeInBytes(), target->bits());
+
+        auto y = region.y();
+        if (invertNeeded && !invertNeededAndSupported)
+            y = target->height() - y;
+
+        context->glReadnPixels(region.x(), y, region.width(), region.height(),
+                              GL_BGRA, GL_UNSIGNED_BYTE,
+                              target->sizeInBytes(), target->bits());
         GLFramebuffer::popFramebuffer();
-    } else {
-        // For non-ES OpenGL, we need to read the full texture first, then extract the region
-        // This is less optimal but more compatible
-        QImage fullImage(texture->size(), QImage::Format_ARGB32_Premultiplied);
-        context->glGetnTexImage(texture->target(), 0, GL_BGRA, GL_UNSIGNED_BYTE, 
-                               fullImage.sizeInBytes(), fullImage.bits());
-        *target = fullImage.copy(region);
     }
+
+    glPixelStorei(GL_PACK_ROW_LENGTH, oldRowLength);
 
     if (invertNeededAndSupported) {
         if (!prev) {

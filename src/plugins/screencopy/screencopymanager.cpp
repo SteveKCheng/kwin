@@ -110,21 +110,20 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
                           QImage::Format_ARGB32_Premultiplied);
         grabTexture(texture.get(), &targetImage);
     } else {
-        // Partial copy - copy only the bounding rectangle
-        QImage regionImage(copyRegion.size(), QImage::Format_ARGB32_Premultiplied);
-        grabTextureRegion(texture.get(), &regionImage, copyRegion);
-        
-        // Copy the region data to the client buffer at the correct position
+        // Partial copy - copy only the bounding rectangle directly to client buffer
         const int bytesPerPixel = 4; // ARGB32
-        const int srcStride = regionImage.bytesPerLine();
         const int dstStride = static_cast<int>(mapping.stride);
-        const uchar *srcData = regionImage.constBits();
-        uchar *dstData = static_cast<uchar*>(mapping.data) + 
-                        (copyRegion.y() * dstStride) + (copyRegion.x() * bytesPerPixel);
+        uchar *regionStart = static_cast<uchar*>(mapping.data) + 
+                            (copyRegion.y() * dstStride) + (copyRegion.x() * bytesPerPixel);
         
-        for (int y = 0; y < copyRegion.height(); ++y) {
-            memcpy(dstData + y * dstStride, srcData + y * srcStride, copyRegion.width() * bytesPerPixel);
-        }
+        // Create QImage wrapper directly around the region in client buffer
+        // This avoids the extra memcpy by writing directly to the right location
+        QImage regionImage(regionStart, 
+                          copyRegion.width(), copyRegion.height(),
+                          dstStride,  // Use client buffer stride
+                          QImage::Format_ARGB32_Premultiplied);
+        
+        grabTextureRegion(texture.get(), &regionImage, copyRegion);
     }
 
     // Unmap the buffer

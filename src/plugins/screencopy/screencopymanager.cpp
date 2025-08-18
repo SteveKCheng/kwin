@@ -111,29 +111,20 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
         return;
     }
 
-    if (copyRegion == QRect(0, 0, bufferSize.width(), bufferSize.height())) {
-        // Full copy - use the existing optimized path
-        QImage targetImage(static_cast<uchar*>(mapping.data), 
-                          bufferSize.width(), bufferSize.height(),
-                          static_cast<qsizetype>(mapping.stride),
-                          QImage::Format_ARGB32_Premultiplied);
-        grabTexture(texture.get(), &targetImage);
-    } else {
-        // Partial copy - copy only the bounding rectangle directly to client buffer
-        const int bytesPerPixel = 4; // ARGB32
-        const int dstStride = static_cast<int>(mapping.stride);
-        uchar *regionStart = static_cast<uchar*>(mapping.data) + 
-                            (copyRegion.y() * dstStride) + (copyRegion.x() * bytesPerPixel);
-        
-        // Create QImage wrapper directly around the region in client buffer
-        // This avoids the extra memcpy by writing directly to the right location
-        QImage regionImage(regionStart, 
-                          copyRegion.width(), copyRegion.height(),
-                          dstStride,  // Use client buffer stride
-                          QImage::Format_ARGB32_Premultiplied);
-        
-        grabTextureRegion(texture.get(), &regionImage, copyRegion);
-    }
+    // Partial copy - copy only the bounding rectangle directly to client buffer
+    const int bytesPerPixel = 4; // ARGB32
+    const int dstStride = static_cast<int>(mapping.stride);
+    uchar *regionStart = static_cast<uchar*>(mapping.data) +
+                        (copyRegion.y() * dstStride) + (copyRegion.x() * bytesPerPixel);
+
+    // Create QImage wrapper directly around the region in client buffer
+    // This avoids the extra memcpy by writing directly to the right location
+    QImage regionImage(regionStart,
+                      copyRegion.width(), copyRegion.height(),
+                      dstStride,  // Use client buffer stride
+                      QImage::Format_ARGB32_Premultiplied);
+
+    grabTextureRegion(texture.get(), &regionImage, copyRegion);
 
     // Unmap the buffer
     clientBuffer->unmap();

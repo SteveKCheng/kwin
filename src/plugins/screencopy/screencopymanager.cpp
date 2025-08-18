@@ -20,7 +20,6 @@
 #include <QImage>
 #include <QObject>
 #include <chrono>
-#include <drm_fourcc.h>
 #include "opengl/glutils.h"
 #include "opengl/eglcontext.h"
 

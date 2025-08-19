@@ -13,7 +13,6 @@
 #include "core/output.h"
 #include "core/renderloop.h"
 #include "core/graphicsbuffer.h"
-#include "opengl/gltexture.h"
 #include "wayland/shmclientbuffer_p.h"
 #include "../screencast/screencastutils.h"
 
@@ -21,7 +20,6 @@
 #include <QObject>
 #include <chrono>
 #include "opengl/glutils.h"
-#include "opengl/eglcontext.h"
 
 // Include the generated protocol header for flag definitions
 #include "qwayland-server-wlr-screencopy-unstable-v1.h"
@@ -29,61 +27,7 @@
 namespace KWin
 {
 
-// Forward declaration
-static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect *region);
-
-// Helper function to grab a rectangular region from a texture
-static void grabTextureRegion(GLTexture *texture, QImage *target, const QRect &region)
-{
-    const auto context = EglContext::currentContext();
-    const bool invertNeeded = context->isOpenGLES() ^ (texture->contentTransform() != OutputTransform::FlipY);
-    const bool invertNeededAndSupported = invertNeeded && context->supportsPackInvert();
-    GLboolean prev;
-    if (invertNeededAndSupported) {
-        glGetBooleanv(GL_PACK_INVERT_MESA, &prev);
-        glPixelStorei(GL_PACK_INVERT_MESA, GL_TRUE);
-    }
-
-    GLint oldRowLength;
-    glGetIntegerv(GL_PACK_ROW_LENGTH, &oldRowLength);
-    glPixelStorei(GL_PACK_ROW_LENGTH,target->bytesPerLine() / 4);
-
-    texture->bind();
-
-    {
-        // Bind a framebuffer to texture, then read the desired region
-        // from the framebuffer.
-        GLFramebuffer fbo(texture);
-        GLFramebuffer::pushFramebuffer(&fbo);
-        // Read only the specified region
-
-        auto y = region.y();
-        if (invertNeeded && !invertNeededAndSupported)
-            y = target->height() - y;
-
-        context->glReadnPixels(region.x(), y, region.width(), region.height(),
-                              GL_BGRA, GL_UNSIGNED_BYTE,
-                              target->sizeInBytes(), target->bits());
-        GLFramebuffer::popFramebuffer();
-    }
-
-    glPixelStorei(GL_PACK_ROW_LENGTH, oldRowLength);
-
-    if (invertNeededAndSupported) {
-        if (!prev) {
-            glPixelStorei(GL_PACK_INVERT_MESA, prev);
-        }
-    } else if (invertNeeded) {
-        mirrorVertically(static_cast<uchar *>(target->bits()), target->height(), target->bytesPerLine());
-    }
-}
-
 static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource)
-{
-    performCopyRegion(frame, buffer_resource, nullptr);
-}
-
-static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource, const QRect *region)
 {
     auto *clientBuffer = ShmClientBuffer::get(buffer_resource);
     if (!clientBuffer) {
@@ -98,11 +42,6 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
         return;
     }
 
-    const QSize bufferSize = clientBuffer->size();
-    const QRect copyRegion = region != nullptr
-                                ? *region
-                                : QRect(0, 0, bufferSize.width(), bufferSize.height());
-    
     // Map the client buffer to get direct access to its memory
     auto mapping = clientBuffer->map(GraphicsBuffer::Read | GraphicsBuffer::Write);
     if (!mapping.data) {
@@ -111,20 +50,14 @@ static void performCopyRegion(ScreencopyFrameV1Interface *frame, wl_resource *bu
         return;
     }
 
-    // Partial copy - copy only the bounding rectangle directly to client buffer
-    const int bytesPerPixel = 4; // ARGB32
-    const int dstStride = static_cast<int>(mapping.stride);
-    uchar *regionStart = static_cast<uchar*>(mapping.data) +
-                        (copyRegion.y() * dstStride) + (copyRegion.x() * bytesPerPixel);
+    auto frameBox = clientBuffer->size();
 
-    // Create QImage wrapper directly around the region in client buffer
-    // This avoids the extra memcpy by writing directly to the right location
-    QImage regionImage(regionStart,
-                      copyRegion.width(), copyRegion.height(),
-                      dstStride,  // Use client buffer stride
-                      QImage::Format_ARGB32_Premultiplied);
+    QImage frameImage{static_cast<uchar*>(mapping.data),
+                      frameBox.width(), frameBox.height(),
+                      mapping.stride,
+                      QImage::Format_ARGB32_Premultiplied};
 
-    grabTextureRegion(texture.get(), &regionImage, copyRegion);
+    grabTexture(texture.get(), &frameImage);
 
     // Unmap the buffer
     clientBuffer->unmap();
@@ -255,13 +188,33 @@ void ScreencopyManager::processFramesForOutput(Output *output)
         
         auto *buffer = reinterpret_cast<wl_resource*>(bufferVariant.value<qintptr>());
         
-        // Send damage event for the bounding rectangle
+        // Send damage event(s).  The protocol specification says these events
+        // must come "right before" the "ready" event, but really the client
+        // cannot read the frame until we send the "ready" event so it should
+        // be okay to send them earlier, before we start writing to the client's
+        // buffer.  This avoids having to split the code for "mark frame as ready"
+        // away from the helper function performCopy, which is shared for
+        // full-frame copies.
         frame->sendDamage(boundingRect.x(), boundingRect.y(),
-                         boundingRect.width(), boundingRect.height());
-        
-        // Perform the copy with the accumulated damage region
-        // Using the boundingRect of the damage for efficiency
-        performCopyRegion(frame.data(), buffer, &boundingRect);
+                          boundingRect.width(), boundingRect.height());
+
+        // One would be tempted to think that copy_with_damage allows the server
+        // to optimize out the copying of pixels that are not contained in the
+        // damaged area, but at least wayvnc assumes that copy_with_damage
+        // fills the buffer with the full frame.  wayvnc does double-buffering,
+        // so the buffer it passes to us is not guaranteed to have the contents
+        // as of the last update, and it apparently just displays whatever ends up
+        // in the buffer after we mark it as "ready".
+        //
+        // The protocol specification, if read very textually, supports wayvnc's
+        // interpretation: it merely says that "copy_with_damage" is the "same"
+        // as "copy" except that it waits for "damage" occurring.
+        //
+        // So we must copy out the whole frame on every update despite the
+        // inefficiency: e.g. updating a single character in an interative
+        // terminal turns into a ~8 MB CPU memory transfer, depending on the
+        // size of the screen.
+        performCopy(frame.data(), buffer);
 
         // Remove processed frame from pending list
         it = state.pendingFrames.erase(it);

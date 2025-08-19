@@ -27,14 +27,8 @@
 namespace KWin
 {
 
-static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_resource)
+static void performCopy(ScreencopyFrameV1Interface *frame, ShmClientBuffer & clientBuffer)
 {
-    auto *clientBuffer = ShmClientBuffer::get(buffer_resource);
-    if (!clientBuffer) {
-        frame->sendFailed();
-        return;
-    }
-
     // Get the compositor texture for the output
     auto [texture, color] = Compositor::self()->textureForOutput(frame->output()->handle());
     if (!texture) {
@@ -43,14 +37,14 @@ static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_r
     }
 
     // Map the client buffer to get direct access to its memory
-    auto mapping = clientBuffer->map(GraphicsBuffer::Read | GraphicsBuffer::Write);
+    auto mapping = clientBuffer.map(GraphicsBuffer::Write);
     if (!mapping.data) {
-        clientBuffer->unmap();
+        clientBuffer.unmap();
         frame->sendFailed();
         return;
     }
 
-    auto frameBox = clientBuffer->size();
+    auto frameBox = clientBuffer.size();
 
     QImage frameImage{static_cast<uchar*>(mapping.data),
                       frameBox.width(), frameBox.height(),
@@ -60,7 +54,7 @@ static void performCopy(ScreencopyFrameV1Interface *frame, wl_resource *buffer_r
     grabTexture(texture.get(), &frameImage);
 
     // Unmap the buffer
-    clientBuffer->unmap();
+    clientBuffer.unmap();
 
     // Send completion events - no Y_INVERT flag needed since grabTexture handles it
     frame->sendFlags(0);
@@ -84,6 +78,20 @@ ScreencopyManager::~ScreencopyManager()
     delete m_screencopyManager;
 }
 
+struct ScreencopyManager::CopyRequest
+{
+    /**
+     * @brief The frame that is the target for copying.
+     */
+    QPointer<ScreencopyFrameV1Interface> frame;
+
+    /**
+     * @brief The shared-memory buffer captured from the client when it calls
+     *        \c copy or \c copy_with_damage for a frame.
+     */
+    QPointer<ShmClientBuffer> shmBuffer;
+};
+
 void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
 {
     // Set up tracking for frame destruction
@@ -95,25 +103,29 @@ void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
     // Connect to the copy request signal to handle actual copying
     connect(frame, &ScreencopyFrameV1Interface::copyRequested,
             this, [this, frame](wl_resource *buffer, bool withDamage) {
+                auto* shmBuffer = ShmClientBuffer::get(buffer);
+                if (!shmBuffer) {
+                    frame->sendFailed();
+                    return;
+                }
+
                 if (withDamage) {
                     // Set up output tracking if not already done
                     setupOutputTracking(frame->output());
                     
                     Output *output = frame->output()->handle();
                     OutputState &state = m_outputStates[output];
-                    
-                    // Store the frame and buffer for later processing
-                    frame->setProperty("buffer", QVariant::fromValue(reinterpret_cast<qintptr>(buffer)));
-                    state.pendingFrames.append(QPointer<ScreencopyFrameV1Interface>(frame));
-                    
+
+                    state.pending.push_back(CopyRequest{frame, shmBuffer});
+
                     // If we already have accumulated damage, process it immediately
                     if (!state.accumulatedDamage.isEmpty()) {
-                        processFramesForOutput(output);
+                        processFramesForOutput(state);
                     }
                     // If no accumulated damage, the frame will be processed when next damage occurs
                 } else {
                     // For regular copy, do immediate copy
-                    performCopy(frame, buffer);
+                    performCopy(frame, *shmBuffer);
                 }
             });
 }
@@ -134,7 +146,7 @@ void ScreencopyManager::setupOutputTracking(OutputInterface *outputInterface)
     m_outputStates[output].connected = true;
 }
 
-void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damage)
+void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damageLogical)
 {
     if (!m_outputStates.contains(output)) {
         return; // No state for this output
@@ -145,49 +157,33 @@ void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damage
     // Scale damage from logical to physical coordinates
     // Output::outputChange signal provides damage in logical coordinates
     // but we need physical coordinates for the screencopy buffers
-    QRegion scaledDamage = scaleRegion(damage, output->scale());
+    QRegion damagePhysical = scaleRegion(damageLogical, output->scale());
     
     // Accumulate damage since last ready event
-    state.accumulatedDamage = state.accumulatedDamage.united(scaledDamage);
+    state.accumulatedDamage = state.accumulatedDamage.united(damagePhysical);
     
     // Process all pending frames for this output
-    if (!state.pendingFrames.isEmpty()) {
-        processFramesForOutput(output);
+    if (!state.pending.isEmpty()) {
+        processFramesForOutput(state);
     }
 }
 
-void ScreencopyManager::processFramesForOutput(Output *output)
+void ScreencopyManager::processFramesForOutput(OutputState & state)
 {
-    if (!m_outputStates.contains(output)) {
-        return;
-    }
-
-    OutputState &state = m_outputStates[output];
     QRect boundingRect = state.accumulatedDamage.boundingRect();
 
     if (boundingRect.isEmpty())
         return;
 
     // Process all pending frames
-    auto it = state.pendingFrames.begin();
-    while (it != state.pendingFrames.end()) {
-        QPointer<ScreencopyFrameV1Interface> frame = *it;
-        if (!frame) {
-            // Frame was destroyed, remove from list
-            it = state.pendingFrames.erase(it);
+    for (; !state.pending.isEmpty(); state.pending.pop_back()) {
+        auto & item = state.pending.back();
+
+        // Ignore, if the frame or buffer has been destroyed (by the client).
+        // The item will just be removed from the list after this iteration.
+        if (!item.frame || !item.shmBuffer)
             continue;
-        }
-        
-        // Get the buffer that was stored when the frame was requested
-        QVariant bufferVariant = frame->property("buffer");
-        if (!bufferVariant.isValid()) {
-            // No buffer stored, skip this frame
-            ++it;
-            continue;
-        }
-        
-        auto *buffer = reinterpret_cast<wl_resource*>(bufferVariant.value<qintptr>());
-        
+
         // Send damage event(s).  The protocol specification says these events
         // must come "right before" the "ready" event, but really the client
         // cannot read the frame until we send the "ready" event so it should
@@ -195,8 +191,8 @@ void ScreencopyManager::processFramesForOutput(Output *output)
         // buffer.  This avoids having to split the code for "mark frame as ready"
         // away from the helper function performCopy, which is shared for
         // full-frame copies.
-        frame->sendDamage(boundingRect.x(), boundingRect.y(),
-                          boundingRect.width(), boundingRect.height());
+        item.frame->sendDamage(boundingRect.x(), boundingRect.y(),
+                               boundingRect.width(), boundingRect.height());
 
         // One would be tempted to think that copy_with_damage allows the server
         // to optimize out the copying of pixels that are not contained in the
@@ -214,10 +210,7 @@ void ScreencopyManager::processFramesForOutput(Output *output)
         // inefficiency: e.g. updating a single character in an interative
         // terminal turns into a ~8 MB CPU memory transfer, depending on the
         // size of the screen.
-        performCopy(frame.data(), buffer);
-
-        // Remove processed frame from pending list
-        it = state.pendingFrames.erase(it);
+        performCopy(item.frame.data(), *item.shmBuffer);
     }
     
     // Clear accumulated damage since we've processed all frames
@@ -226,10 +219,13 @@ void ScreencopyManager::processFramesForOutput(Output *output)
 
 void ScreencopyManager::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
 {
-    // Remove the frame from all pending frame lists
-    for (auto &state : m_outputStates) {
-        state.pendingFrames.removeAll(QPointer<ScreencopyFrameV1Interface>(frame));
-    }
+    auto it = m_outputStates.find(frame->output()->handle());
+    if (it == m_outputStates.end())
+        return;
+
+    it->pending.removeIf([frame](const CopyRequest &item) {
+        return item.frame == frame;
+    });
 }
 
 } // namespace KWin

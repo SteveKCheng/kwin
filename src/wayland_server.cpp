@@ -66,9 +66,8 @@
 #include "wayland/presentationtime.h"
 #include "wayland/primaryselectiondevicemanager_v1.h"
 #include "wayland/relativepointer_v1.h"
-#include "wayland/screencast_v1.h"
-#include "wayland/screencopy_v1.h"
 #include "wayland/screenedge_v1.h"
+#include "wayland/seat.h"
 #include "wayland/securitycontext_v1.h"
 #include "wayland/server_decoration.h"
 #include "wayland/server_decoration_palette.h"
@@ -531,7 +530,6 @@ bool WaylandServer::init()
     m_singlePixelBuffer = new SinglePixelBufferManagerV1(m_display, m_display);
     m_toplevelTag = new XdgToplevelTagManagerV1(m_display, m_display);
     m_colorRepresentation = new ColorRepresentationManagerV1(m_display, m_display);
-    m_screencopyManager = new ScreencopyManagerV1Interface(m_display, m_display);
     return true;
 }
 

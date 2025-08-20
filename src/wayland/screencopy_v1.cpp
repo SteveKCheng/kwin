@@ -98,22 +98,10 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    auto frameInterface = m_parent->createFrame(overlay_cursor != 0,
-                                                QRect(),
-                                                frameResource,
-                                                outputInterface);
-
-    // Send buffer format information
-    Output *output = outputInterface->handle();
-    QSize outputSize = output->pixelSize();
-    uint32_t format = DRM_FORMAT_ARGB8888; // Standard ARGB format
-    uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
-
-    frameInterface->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
-    frameInterface->sendBufferDone();
-
-    // Emit signal for frame processing
-    Q_EMIT m_parent->frameRequested(frameInterface);
+    m_parent->createFrame(overlay_cursor != 0,
+                          QRect(),
+                          frameResource,
+                          outputInterface);
 }
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,

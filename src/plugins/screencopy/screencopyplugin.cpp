@@ -69,28 +69,43 @@ class ScreencopyManagerImpl final : public ScreencopyManagerV1Interface
 public:
     ScreencopyManagerImpl(Display *display, ScreencopyPlugin* parent)
         : ScreencopyManagerV1Interface(display, parent)
+        , m_parent(parent)
     {
     }
+
+private:
+    ScreencopyPlugin* const m_parent;
 
 protected:
     ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
                                             const QRect &frameBox,
                                             wl_resource* frameResource,
-                                            OutputInterface* output) override
+                                            OutputInterface* outputInterface) override
     {
-        return new ScreencopyFrameV1Interface(frameResource,
-                                              output,
-                                              QRect(),
-                                              overlayCursor,
-                                              this);
+        auto* frameInterface = new ScreencopyFrameV1Interface(frameResource,
+                                                              outputInterface,
+                                                              QRect(),
+                                                              overlayCursor,
+                                                              this);
+
+        // Send buffer format information
+        Output *output = outputInterface->handle();
+        QSize outputSize = output->pixelSize();
+        uint32_t format = WL_SHM_FORMAT_ARGB8888;
+        uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
+
+        frameInterface->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
+        frameInterface->sendBufferDone();
+
+        m_parent->handleFrameRequested(frameInterface);
+
+        return frameInterface;
     }
 };
 
 ScreencopyPlugin::ScreencopyPlugin()
     : m_screencopyManager(std::make_unique<ScreencopyManagerImpl>(waylandServer()->display(), this))
 {
-    connect(m_screencopyManager.get(), &ScreencopyManagerV1Interface::frameRequested,
-            this, &ScreencopyPlugin::handleFrameRequested);
 }
 
 ScreencopyPlugin::~ScreencopyPlugin() = default;

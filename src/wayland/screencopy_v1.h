@@ -41,12 +41,6 @@ public:
     explicit ScreencopyManagerV1Interface(Display *display, QObject *parent);
     ~ScreencopyManagerV1Interface() override;
 
-Q_SIGNALS:
-    /**
-     * This signal is emitted when a new screencopy frame @a frame has been requested.
-     */
-    void frameRequested(ScreencopyFrameV1Interface *frame);
-
 private:
     friend class ScreencopyManagerV1InterfacePrivate;
     const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;

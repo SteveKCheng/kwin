@@ -27,8 +27,9 @@ public:
     explicit ScreencopyPlugin();
     ~ScreencopyPlugin() override;
 
-private Q_SLOTS:
     void handleFrameRequested(ScreencopyFrameV1Interface *frame);
+
+private Q_SLOTS:
     void handleOutputChange(Output *output, const QRegion &damageLogical);
     void handleFrameDestroyed(ScreencopyFrameV1Interface *frame);
 

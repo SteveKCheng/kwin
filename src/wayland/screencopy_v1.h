@@ -49,7 +49,7 @@ Q_SIGNALS:
 
 private:
     friend class ScreencopyManagerV1InterfacePrivate;
-    std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
+    const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
 
 protected:
     /**
@@ -86,11 +86,6 @@ class KWIN_EXPORT ScreencopyFrameV1Interface : public QObject
     Q_OBJECT
 
 public:
-    enum class BufferType {
-        Shm,
-        DmaBuf
-    };
-
     ~ScreencopyFrameV1Interface() override;
 
     /**
@@ -164,7 +159,8 @@ public:
                                         ScreencopyManagerV1Interface *parent);
 
 private:
-    std::unique_ptr<ScreencopyFrameV1InterfacePrivate> d;
+    friend class ScreencopyFrameV1InterfacePrivate;
+    const std::unique_ptr<ScreencopyFrameV1InterfacePrivate> d;
 };
 
 } // namespace KWin

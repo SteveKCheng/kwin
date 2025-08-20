@@ -24,7 +24,11 @@ static const int s_version = 3;
 class ScreencopyManagerV1InterfacePrivate final : public QtWaylandServer::zwlr_screencopy_manager_v1
 {
 public:
-    ScreencopyManagerV1InterfacePrivate(ScreencopyManagerV1Interface *q, Display *display);
+    ScreencopyManagerV1InterfacePrivate(ScreencopyManagerV1Interface *q, Display *display)
+        : QtWaylandServer::zwlr_screencopy_manager_v1(*display, s_version)
+        , m_parent(q)
+    {
+    }
 
 private:
     ScreencopyManagerV1Interface* const m_parent;
@@ -44,13 +48,19 @@ protected:
                                                           int32_t width,
                                                           int32_t height) override;
 
-    void zwlr_screencopy_manager_v1_destroy(Resource *resource) override;
+    void zwlr_screencopy_manager_v1_destroy(Resource *resource) override
+    {
+        wl_resource_destroy(resource->handle);
+    }
 };
 
 class ScreencopyFrameV1InterfacePrivate final : public QtWaylandServer::zwlr_screencopy_frame_v1
 {
 public:
-    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q);
+    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q)
+        : m_parent(q)
+    {
+    }
 
     QPointer<OutputInterface> output;
     QRect region;
@@ -63,19 +73,17 @@ protected:
     void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override;
     void zwlr_screencopy_frame_v1_copy(Resource *resource, struct ::wl_resource *buffer) override;
     void zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, struct ::wl_resource *buffer) override;
-    void zwlr_screencopy_frame_v1_destroy(Resource *resource) override;
+
+    void zwlr_screencopy_frame_v1_destroy(Resource *resource) override
+    {
+        wl_resource_destroy(resource->handle);
+    }
 };
 
-ScreencopyManagerV1InterfacePrivate::ScreencopyManagerV1InterfacePrivate(ScreencopyManagerV1Interface *q, Display *display)
-    : QtWaylandServer::zwlr_screencopy_manager_v1(*display, s_version)
-    , m_parent(q)
-{
-}
-
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output(Resource *resource,
-                                                                                   uint32_t frame,
-                                                                                   int32_t overlay_cursor,
-                                                                                   wl_resource *output_resource)
+                                                                                    uint32_t frame,
+                                                                                    int32_t overlay_cursor,
+                                                                                    wl_resource *output_resource)
 {
     // Get the OutputInterface from the wl_resource
     OutputInterface *outputInterface = OutputInterface::get(output_resource);
@@ -109,13 +117,13 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
 }
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,
-                                                                                          uint32_t frame,
-                                                                                          int32_t overlay_cursor,
-                                                                                          wl_resource *output_resource,
-                                                                                          int32_t x,
-                                                                                          int32_t y,
-                                                                                          int32_t width,
-                                                                                          int32_t height)
+                                                                                           uint32_t frame,
+                                                                                           int32_t overlay_cursor,
+                                                                                           wl_resource *output_resource,
+                                                                                           int32_t x,
+                                                                                           int32_t y,
+                                                                                           int32_t width,
+                                                                                           int32_t height)
 {
     /*
     // TODO: Implement region capture
@@ -135,16 +143,6 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
     */
 }
 
-void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_destroy(Resource *resource)
-{
-    wl_resource_destroy(resource->handle);
-}
-
-ScreencopyFrameV1InterfacePrivate::ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q)
-    : m_parent(q)
-{
-}
-
 void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy_resource(Resource *resource)
 {
     Q_EMIT m_parent->destroyed();
@@ -161,10 +159,9 @@ void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_copy_with_damag
     Q_EMIT m_parent->copyRequested(buffer, true);
 }
 
-void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy(Resource *resource)
-{
-    wl_resource_destroy(resource->handle);
-}
+//
+// Implementation of ScreencopyManagerV1Interface
+//
 
 ScreencopyManagerV1Interface::ScreencopyManagerV1Interface(Display *display, QObject *parent)
     : QObject(parent)
@@ -172,9 +169,7 @@ ScreencopyManagerV1Interface::ScreencopyManagerV1Interface(Display *display, QOb
 {
 }
 
-ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface()
-{
-}
+ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 
 ScreencopyFrameV1Interface*
 ScreencopyManagerV1Interface::createFrame(bool overlayCursor,
@@ -188,6 +183,10 @@ ScreencopyManagerV1Interface::createFrame(bool overlayCursor,
                                           overlayCursor,
                                           this);
 }
+
+//
+// Implementation of ScreencopyFrameV1Interface
+//
 
 ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResource,
                                                        OutputInterface* output,
@@ -203,13 +202,11 @@ ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResourc
     d->init(frameResource);
 }
 
-ScreencopyFrameV1Interface::~ScreencopyFrameV1Interface()
-{
-}
+ScreencopyFrameV1Interface::~ScreencopyFrameV1Interface() = default;
 
 OutputInterface *ScreencopyFrameV1Interface::output() const
 {
-    return d->output;
+    return d->output.get();
 }
 
 QRect ScreencopyFrameV1Interface::region() const

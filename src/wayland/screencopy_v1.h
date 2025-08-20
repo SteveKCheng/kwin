@@ -109,7 +109,7 @@ public:
      */
     bool waitForDamage() const;
 
-public:
+protected:
     /**
      * Send buffer format information to the client.
      * This should be called for each supported buffer type.

@@ -27,43 +27,6 @@
 namespace KWin
 {
 
-static void performCopy(ScreencopyFrameV1Interface *frame, ShmClientBuffer & clientBuffer)
-{
-    // Get the compositor texture for the output
-    auto [texture, color] = Compositor::self()->textureForOutput(frame->output()->handle());
-    if (!texture) {
-        frame->sendFailed();
-        return;
-    }
-
-    // Map the client buffer to get direct access to its memory
-    auto mapping = clientBuffer.map(GraphicsBuffer::Write);
-    if (!mapping.data) {
-        clientBuffer.unmap();
-        frame->sendFailed();
-        return;
-    }
-
-    auto frameBox = clientBuffer.size();
-
-    QImage frameImage{static_cast<uchar*>(mapping.data),
-                      frameBox.width(), frameBox.height(),
-                      mapping.stride,
-                      QImage::Format_ARGB32_Premultiplied};
-
-    grabTexture(texture.get(), &frameImage);
-
-    // Unmap the buffer
-    clientBuffer.unmap();
-
-    // Send completion events - no Y_INVERT flag needed since grabTexture handles it
-    frame->sendFlags(0);
-
-    // Send timestamp using the output's presentation timestamp
-    auto timestamp = frame->output()->handle()->renderLoop()->lastPresentationTimestamp();
-    frame->sendReady(timestamp);
-}
-
 class ScreencopyManagerImpl final : public ScreencopyManagerV1Interface
 {
     Q_OBJECT
@@ -114,6 +77,15 @@ private:
      * will be de-registered.
      */
     void sendUpdatedContents();
+
+    /**
+     * @brief Render the contents of the frame to the given buffer, and
+     *        mark it as ready for the client.
+     *
+     * All of the frame will be rendered; this method does not clip the output
+     * to (the bounding box of) acccumulatedDamage.
+     */
+    void renderToBuffer(ShmClientBuffer &clientBuffer);
 
     /**
      * @brief The region of the Output that has changed since the last "ready" event
@@ -188,7 +160,7 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
 
     } else {
         // For regular copy, do immediate copy
-        performCopy(this, *clientBuffer);
+        renderToBuffer(*clientBuffer);
         accumulatedDamage = QRegion();
     }
 }
@@ -244,10 +216,49 @@ void ScreencopyFrameImpl::sendUpdatedContents()
     // inefficiency: e.g. updating a single character in an interative
     // terminal turns into a ~8 MB CPU memory transfer, depending on the
     // size of the screen.
-    performCopy(this, *clientBuffer);
+    renderToBuffer(*clientBuffer);
 
     accumulatedDamage = QRegion();
     capturedShmBuffer = nullptr;
+}
+
+void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
+{
+    Output* output = this->output()->handle();
+
+    // Get the compositor texture for the output
+    auto [texture, color] = Compositor::self()->textureForOutput(output);
+    if (!texture) {
+        sendFailed();
+        return;
+    }
+
+    // Map the client buffer to get direct access to its memory
+    auto mapping = clientBuffer.map(GraphicsBuffer::Write);
+    if (!mapping.data) {
+        clientBuffer.unmap();
+        sendFailed();
+        return;
+    }
+
+    auto frameBox = clientBuffer.size();
+
+    QImage frameImage{static_cast<uchar*>(mapping.data),
+                      frameBox.width(), frameBox.height(),
+                      mapping.stride,
+                      QImage::Format_ARGB32_Premultiplied};
+
+    grabTexture(texture.get(), &frameImage);
+
+    // Unmap the buffer
+    clientBuffer.unmap();
+
+    // Send completion events - no Y_INVERT flag needed since grabTexture handles it
+    sendFlags(0);
+
+    // Send timestamp using the output's presentation timestamp
+    auto timestamp = output->renderLoop()->lastPresentationTimestamp();
+    sendReady(timestamp);
 }
 
 //

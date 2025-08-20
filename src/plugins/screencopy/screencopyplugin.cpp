@@ -66,6 +66,7 @@ static void performCopy(ScreencopyFrameV1Interface *frame, ShmClientBuffer & cli
 
 class ScreencopyManagerImpl final : public ScreencopyManagerV1Interface
 {
+    Q_OBJECT
 public:
     ScreencopyManagerImpl(Display *display, ScreencopyPlugin* parent)
         : ScreencopyManagerV1Interface(display, parent)
@@ -84,14 +85,49 @@ protected:
 
 class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface
 {
+    Q_OBJECT
 public:
     ScreencopyFrameImpl(wl_resource* frameResource,
                         OutputInterface* outputInterface,
                         const QRect &region,
                         bool includeCursor,
                         ScreencopyManagerImpl *parent);
+
+private Q_SLOTS:
+    void handleOutputChange(const QRegion &damageLogical);
+
 private:
-    ScreencopyPlugin* const plugin;
+    /**
+     * @brief Set up connections to the underlying Output to watch for changes.
+     *
+     * This method is called once from the constructor.  The connection must last
+     * for the lifetime of this frame, since the client can call \c copy_with_damage
+     * an any time in the future.
+     */
+    void trackOutput();
+
+    /**
+     * @brief Send to the client the contents of the damaged region,
+     *        if a buffer has been registered with this frame earlier.
+     *
+     * The damaged region will be cleared afterwards, and the registered client buffer
+     * will be de-registered.
+     */
+    void sendUpdatedContents();
+
+    /**
+     * @brief The region of the Output that has changed since the last "ready" event
+     *        was fired.
+     *
+     * This region is expressed in physical (scaled) coordinates.
+     */
+    QRegion accumulatedDamage;
+
+    /**
+     * @brief The shared-memory buffer captured from the client when it calls
+     *        \c copy or \c copy_with_damage for a frame.
+     */
+    QPointer<ShmClientBuffer> capturedShmBuffer;
 
 protected:
     void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
@@ -116,7 +152,6 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
                                          bool includeCursor,
                                          ScreencopyManagerImpl *parent)
     : ScreencopyFrameV1Interface(frameResource, outputInterface, region, includeCursor, parent)
-    , plugin(parent->m_parent)
 {
     // Send buffer format information
     Output *output = outputInterface->handle();
@@ -126,7 +161,98 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
 
     sendBuffer(format, outputSize.width(), outputSize.height(), stride);
     sendBufferDone();
+
+    trackOutput();
 }
+
+void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool waitForDamage)
+{
+    // Fail if output has already gone away.
+    if (!output()) {
+        sendFailed();
+        return;
+    }
+
+    if (capturedShmBuffer) {
+        // zwlr_screencopy_frame_v1::error::already_used
+        sendFailed();
+        return;
+    }
+
+    if (waitForDamage) {
+        capturedShmBuffer = clientBuffer;
+
+        // If we already have accumulated updates, send to the client right away
+        if (!accumulatedDamage.isEmpty())
+            sendUpdatedContents();
+
+    } else {
+        // For regular copy, do immediate copy
+        performCopy(this, *clientBuffer);
+        accumulatedDamage = QRegion();
+    }
+}
+
+void ScreencopyFrameImpl::trackOutput()
+{
+    Output* output = this->output()->handle();
+    if (!output)
+        return;
+
+    connect(output, &Output::outputChange, this, &ScreencopyFrameImpl::handleOutputChange);
+}
+
+void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
+{
+    auto damagePhysical = scaleRegion(damageLogical, output()->handle()->scale());
+    accumulatedDamage = accumulatedDamage.united(damagePhysical);
+
+    sendUpdatedContents();
+}
+
+void ScreencopyFrameImpl::sendUpdatedContents()
+{
+    auto* clientBuffer = capturedShmBuffer.get();
+    if (clientBuffer == nullptr)
+        return;
+
+    QRect boundingRect = accumulatedDamage.boundingRect();
+
+    // Send damage event(s).  The protocol specification says these events
+    // must come "right before" the "ready" event, but really the client
+    // cannot read the frame until we send the "ready" event so it should
+    // be okay to send them earlier, before we start writing to the client's
+    // buffer.  This avoids having to split the code for "mark frame as ready"
+    // away from the helper function performCopy, which is shared for
+    // full-frame copies.
+    sendDamage(boundingRect.x(), boundingRect.y(),
+               boundingRect.width(), boundingRect.height());
+
+    // One would be tempted to think that copy_with_damage allows the server
+    // to optimize out the copying of pixels that are not contained in the
+    // damaged area, but at least wayvnc assumes that copy_with_damage
+    // fills the buffer with the full frame.  wayvnc does double-buffering,
+    // so the buffer it passes to us is not guaranteed to have the contents
+    // as of the last update, and it apparently just displays whatever ends up
+    // in the buffer after we mark it as "ready".
+    //
+    // The protocol specification, if read very textually, supports wayvnc's
+    // interpretation: it merely says that "copy_with_damage" is the "same"
+    // as "copy" except that it waits for "damage" occurring.
+    //
+    // So we must copy out the whole frame on every update despite the
+    // inefficiency: e.g. updating a single character in an interative
+    // terminal turns into a ~8 MB CPU memory transfer, depending on the
+    // size of the screen.
+    performCopy(this, *clientBuffer);
+
+    accumulatedDamage = QRegion();
+    capturedShmBuffer = nullptr;
+}
+
+//
+// Implementation of ScreencopyPlugin
+//
 
 ScreencopyPlugin::ScreencopyPlugin()
     : m_screencopyManager(std::make_unique<ScreencopyManagerImpl>(waylandServer()->display(), this))
@@ -134,129 +260,6 @@ ScreencopyPlugin::ScreencopyPlugin()
 }
 
 ScreencopyPlugin::~ScreencopyPlugin() = default;
-
-struct ScreencopyPlugin::CopyRequest
-{
-    /**
-     * @brief The frame that is the target for copying.
-     */
-    QPointer<ScreencopyFrameV1Interface> frame;
-
-    /**
-     * @brief The shared-memory buffer captured from the client when it calls
-     *        \c copy or \c copy_with_damage for a frame.
-     */
-    QPointer<ShmClientBuffer> shmBuffer;
-};
-
-void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool waitForDamage)
-{
-    if (waitForDamage) {
-        // Set up output tracking if not already done
-        plugin->setupOutputTracking(output());
-
-        Output *output = this->output()->handle();
-        auto &state = plugin->m_outputStates[output];
-
-        state.pending.push_back({this, clientBuffer});
-
-        // If we already have accumulated damage, process it immediately
-        if (!state.accumulatedDamage.isEmpty()) {
-            plugin->processFramesForOutput(state);
-        }
-        // If no accumulated damage, the frame will be processed when next damage occurs
-    } else {
-        // For regular copy, do immediate copy
-        performCopy(this, *clientBuffer);
-    }
-}
-
-void ScreencopyPlugin::setupOutputTracking(OutputInterface *outputInterface)
-{
-    Output *output = outputInterface->handle();
-    if (!output || m_outputStates[output].connected) {
-        return; // Already connected or invalid output
-    }
-    
-    // Connect to output change signals - this connection persists for the lifetime of the plugin
-    connect(output, &Output::outputChange,
-            this, [this, output](const QRegion &damage) {
-                handleOutputChange(output, damage);
-            });
-    
-    m_outputStates[output].connected = true;
-}
-
-void ScreencopyPlugin::handleOutputChange(Output *output, const QRegion &damageLogical)
-{
-    if (!m_outputStates.contains(output)) {
-        return; // No state for this output
-    }
-    
-    OutputState &state = m_outputStates[output];
-    
-    // Scale damage from logical to physical coordinates
-    // Output::outputChange signal provides damage in logical coordinates
-    // but we need physical coordinates for the screencopy buffers
-    QRegion damagePhysical = scaleRegion(damageLogical, output->scale());
-    
-    // Accumulate damage since last ready event
-    state.accumulatedDamage = state.accumulatedDamage.united(damagePhysical);
-    
-    // Process all pending frames for this output
-    if (!state.pending.isEmpty()) {
-        processFramesForOutput(state);
-    }
-}
-
-void ScreencopyPlugin::processFramesForOutput(OutputState & state)
-{
-    QRect boundingRect = state.accumulatedDamage.boundingRect();
-
-    if (boundingRect.isEmpty())
-        return;
-
-    // Process all pending frames
-    for (; !state.pending.isEmpty(); state.pending.pop_back()) {
-        auto & item = state.pending.back();
-
-        // Ignore, if the frame or buffer has been destroyed (by the client).
-        // The item will just be removed from the list after this iteration.
-        if (!item.frame || !item.shmBuffer)
-            continue;
-
-        // Send damage event(s).  The protocol specification says these events
-        // must come "right before" the "ready" event, but really the client
-        // cannot read the frame until we send the "ready" event so it should
-        // be okay to send them earlier, before we start writing to the client's
-        // buffer.  This avoids having to split the code for "mark frame as ready"
-        // away from the helper function performCopy, which is shared for
-        // full-frame copies.
-        item.frame->sendDamage(boundingRect.x(), boundingRect.y(),
-                               boundingRect.width(), boundingRect.height());
-
-        // One would be tempted to think that copy_with_damage allows the server
-        // to optimize out the copying of pixels that are not contained in the
-        // damaged area, but at least wayvnc assumes that copy_with_damage
-        // fills the buffer with the full frame.  wayvnc does double-buffering,
-        // so the buffer it passes to us is not guaranteed to have the contents
-        // as of the last update, and it apparently just displays whatever ends up
-        // in the buffer after we mark it as "ready".
-        //
-        // The protocol specification, if read very textually, supports wayvnc's
-        // interpretation: it merely says that "copy_with_damage" is the "same"
-        // as "copy" except that it waits for "damage" occurring.
-        //
-        // So we must copy out the whole frame on every update despite the
-        // inefficiency: e.g. updating a single character in an interative
-        // terminal turns into a ~8 MB CPU memory transfer, depending on the
-        // size of the screen.
-        performCopy(item.frame.data(), *item.shmBuffer);
-    }
-    
-    // Clear accumulated damage since we've processed all frames
-    state.accumulatedDamage = QRegion();
-}
 
 } // namespace KWin
 

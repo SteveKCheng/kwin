@@ -19,13 +19,13 @@ class ScreencopyFrameV1Interface;
 class Output;
 class OutputInterface;
 
-class ScreencopyManager : public Plugin
+class ScreencopyPlugin : public Plugin
 {
     Q_OBJECT
 
 public:
-    explicit ScreencopyManager();
-    ~ScreencopyManager() override;
+    explicit ScreencopyPlugin();
+    ~ScreencopyPlugin() override;
 
 private Q_SLOTS:
     void handleFrameRequested(ScreencopyFrameV1Interface *frame);

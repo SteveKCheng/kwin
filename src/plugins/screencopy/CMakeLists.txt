@@ -1,7 +1,7 @@
 kcoreaddons_add_plugin(screencopy INSTALL_NAMESPACE "kwin/plugins")
 target_sources(screencopy PRIVATE
     main.cpp
-    screencopymanager.cpp
+    screencopyplugin.cpp
 )
 
 ecm_qt_declare_logging_category(screencopy

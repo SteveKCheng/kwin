@@ -4,7 +4,7 @@
     SPDX-License-Identifier: LGPL-2.0-or-later
 */
 
-#include "screencopymanager.h"
+#include "screencopyplugin.h"
 #include "wayland/screencopy_v1.h"
 #include "wayland/output.h"
 
@@ -64,21 +64,21 @@ static void performCopy(ScreencopyFrameV1Interface *frame, ShmClientBuffer & cli
     frame->sendReady(timestamp);
 }
 
-ScreencopyManager::ScreencopyManager()
+ScreencopyPlugin::ScreencopyPlugin()
     : Plugin()
 {
     m_screencopyManager = new ScreencopyManagerV1Interface(waylandServer()->display(), this);
     
     connect(m_screencopyManager, &ScreencopyManagerV1Interface::frameRequested,
-            this, &ScreencopyManager::handleFrameRequested);
+            this, &ScreencopyPlugin::handleFrameRequested);
 }
 
-ScreencopyManager::~ScreencopyManager()
+ScreencopyPlugin::~ScreencopyPlugin()
 {
     delete m_screencopyManager;
 }
 
-struct ScreencopyManager::CopyRequest
+struct ScreencopyPlugin::CopyRequest
 {
     /**
      * @brief The frame that is the target for copying.
@@ -92,7 +92,7 @@ struct ScreencopyManager::CopyRequest
     QPointer<ShmClientBuffer> shmBuffer;
 };
 
-void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
+void ScreencopyPlugin::handleFrameRequested(ScreencopyFrameV1Interface *frame)
 {
     // Set up tracking for frame destruction
     connect(frame, &ScreencopyFrameV1Interface::destroyed,
@@ -130,7 +130,7 @@ void ScreencopyManager::handleFrameRequested(ScreencopyFrameV1Interface *frame)
             });
 }
 
-void ScreencopyManager::setupOutputTracking(OutputInterface *outputInterface)
+void ScreencopyPlugin::setupOutputTracking(OutputInterface *outputInterface)
 {
     Output *output = outputInterface->handle();
     if (!output || m_outputStates[output].connected) {
@@ -146,7 +146,7 @@ void ScreencopyManager::setupOutputTracking(OutputInterface *outputInterface)
     m_outputStates[output].connected = true;
 }
 
-void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damageLogical)
+void ScreencopyPlugin::handleOutputChange(Output *output, const QRegion &damageLogical)
 {
     if (!m_outputStates.contains(output)) {
         return; // No state for this output
@@ -168,7 +168,7 @@ void ScreencopyManager::handleOutputChange(Output *output, const QRegion &damage
     }
 }
 
-void ScreencopyManager::processFramesForOutput(OutputState & state)
+void ScreencopyPlugin::processFramesForOutput(OutputState & state)
 {
     QRect boundingRect = state.accumulatedDamage.boundingRect();
 
@@ -217,7 +217,7 @@ void ScreencopyManager::processFramesForOutput(OutputState & state)
     state.accumulatedDamage = QRegion();
 }
 
-void ScreencopyManager::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
+void ScreencopyPlugin::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
 {
     auto it = m_outputStates.find(frame->output()->handle());
     if (it == m_outputStates.end())
@@ -230,4 +230,4 @@ void ScreencopyManager::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
 
 } // namespace KWin
 
-#include "screencopymanager.moc"
+#include "screencopyplugin.moc"

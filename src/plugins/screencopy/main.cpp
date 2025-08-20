@@ -4,7 +4,7 @@
     SPDX-License-Identifier: LGPL-2.0-or-later
 */
 
-#include "screencopymanager.h"
+#include "screencopyplugin.h"
 
 #include <KPluginFactory>
 
@@ -24,7 +24,7 @@ public:
 
 std::unique_ptr<Plugin> ScreencopyManagerFactory::create() const
 {
-    return std::make_unique<ScreencopyManager>();
+    return std::make_unique<ScreencopyPlugin>();
 }
 
 #include "main.moc"

@@ -171,19 +171,6 @@ ScreencopyManagerV1Interface::ScreencopyManagerV1Interface(Display *display, QOb
 
 ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 
-ScreencopyFrameV1Interface*
-ScreencopyManagerV1Interface::createFrame(bool overlayCursor,
-                                          const QRect &frameBox,
-                                          wl_resource* frameResource,
-                                          OutputInterface* output)
-{
-    return new ScreencopyFrameV1Interface(frameResource,
-                                          output,
-                                          QRect(),
-                                          overlayCursor,
-                                          this);
-}
-
 //
 // Implementation of ScreencopyFrameV1Interface
 //

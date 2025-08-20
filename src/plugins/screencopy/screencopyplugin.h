@@ -45,7 +45,7 @@ private:
     void processFramesForOutput(OutputState &state);
     void setupOutputTracking(OutputInterface *outputInterface);
 
-    ScreencopyManagerV1Interface *m_screencopyManager = nullptr;
+    const std::unique_ptr<ScreencopyManagerV1Interface> m_screencopyManager;
 
     QHash<Output*, OutputState> m_outputStates;           // Track state for each output
 };

@@ -64,19 +64,36 @@ static void performCopy(ScreencopyFrameV1Interface *frame, ShmClientBuffer & cli
     frame->sendReady(timestamp);
 }
 
-ScreencopyPlugin::ScreencopyPlugin()
-    : Plugin()
+class ScreencopyManagerImpl final : public ScreencopyManagerV1Interface
 {
-    m_screencopyManager = new ScreencopyManagerV1Interface(waylandServer()->display(), this);
-    
-    connect(m_screencopyManager, &ScreencopyManagerV1Interface::frameRequested,
+public:
+    ScreencopyManagerImpl(Display *display, ScreencopyPlugin* parent)
+        : ScreencopyManagerV1Interface(display, parent)
+    {
+    }
+
+protected:
+    ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
+                                            const QRect &frameBox,
+                                            wl_resource* frameResource,
+                                            OutputInterface* output) override
+    {
+        return new ScreencopyFrameV1Interface(frameResource,
+                                              output,
+                                              QRect(),
+                                              overlayCursor,
+                                              this);
+    }
+};
+
+ScreencopyPlugin::ScreencopyPlugin()
+    : m_screencopyManager(std::make_unique<ScreencopyManagerImpl>(waylandServer()->display(), this))
+{
+    connect(m_screencopyManager.get(), &ScreencopyManagerV1Interface::frameRequested,
             this, &ScreencopyPlugin::handleFrameRequested);
 }
 
-ScreencopyPlugin::~ScreencopyPlugin()
-{
-    delete m_screencopyManager;
-}
+ScreencopyPlugin::~ScreencopyPlugin() = default;
 
 struct ScreencopyPlugin::CopyRequest
 {

@@ -38,7 +38,7 @@ class KWIN_EXPORT ScreencopyManagerV1Interface : public QObject
     Q_OBJECT
 
 public:
-    explicit ScreencopyManagerV1Interface(Display *display, QObject *parent = nullptr);
+    explicit ScreencopyManagerV1Interface(Display *display, QObject *parent);
     ~ScreencopyManagerV1Interface() override;
 
 Q_SIGNALS:
@@ -73,7 +73,7 @@ protected:
     virtual ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
                                                     const QRect &frameBox,
                                                     wl_resource* frameResource,
-                                                    OutputInterface* output);
+                                                    OutputInterface* output) = 0;
 };
 
 /**

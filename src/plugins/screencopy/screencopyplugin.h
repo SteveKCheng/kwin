@@ -31,7 +31,6 @@ public:
 
 private Q_SLOTS:
     void handleOutputChange(Output *output, const QRegion &damageLogical);
-    void handleFrameDestroyed(ScreencopyFrameV1Interface *frame);
 
 private:
     const std::unique_ptr<ScreencopyManagerV1Interface> m_screencopyManager;

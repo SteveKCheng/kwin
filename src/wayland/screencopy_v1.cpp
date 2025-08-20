@@ -72,7 +72,16 @@ private:
     void copyRequested(struct ::wl_resource *buffer, bool withDamage);
 
 protected:
-    void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override;
+    void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override
+    {
+        // This object is owned by its parent
+        delete m_parent;
+    }
+
+    void zwlr_screencopy_frame_v1_destroy(Resource *resource) override
+    {
+        wl_resource_destroy(resource->handle);
+    }
 
     void zwlr_screencopy_frame_v1_copy(Resource *resource, struct ::wl_resource *buffer) override
     {
@@ -82,11 +91,6 @@ protected:
     void zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, struct ::wl_resource *buffer) override
     {
         copyRequested(buffer, true);
-    }
-
-    void zwlr_screencopy_frame_v1_destroy(Resource *resource) override
-    {
-        wl_resource_destroy(resource->handle);
     }
 };
 
@@ -139,12 +143,6 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
     // Send failed event for now
     framePrivate->send_failed();
     */
-}
-
-void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy_resource(Resource *resource)
-{
-    Q_EMIT m_parent->destroyed();
-    delete m_parent;
 }
 
 void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool withDamage)

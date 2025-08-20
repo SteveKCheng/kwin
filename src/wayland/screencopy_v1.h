@@ -144,13 +144,6 @@ public:
 
     virtual void copyRequested(ShmClientBuffer* clientBuffer, bool waitForDamage) = 0;
 
-Q_SIGNALS:
-
-    /**
-     * Emitted when the frame is destroyed.
-     */
-    void destroyed();
-
 private:
     friend class ScreencopyFrameV1InterfacePrivate;
     const std::unique_ptr<ScreencopyFrameV1InterfacePrivate> d;

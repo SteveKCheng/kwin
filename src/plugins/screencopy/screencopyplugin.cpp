@@ -126,8 +126,6 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
 
     sendBuffer(format, outputSize.width(), outputSize.height(), stride);
     sendBufferDone();
-
-    plugin->handleFrameRequested(this);
 }
 
 ScreencopyPlugin::ScreencopyPlugin()
@@ -171,15 +169,6 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
         // For regular copy, do immediate copy
         performCopy(this, *clientBuffer);
     }
-}
-
-void ScreencopyPlugin::handleFrameRequested(ScreencopyFrameV1Interface *frame)
-{
-    // Set up tracking for frame destruction
-    connect(frame, &ScreencopyFrameV1Interface::destroyed,
-            this, [this, frame]() {
-                handleFrameDestroyed(frame);
-            });
 }
 
 void ScreencopyPlugin::setupOutputTracking(OutputInterface *outputInterface)
@@ -267,17 +256,6 @@ void ScreencopyPlugin::processFramesForOutput(OutputState & state)
     
     // Clear accumulated damage since we've processed all frames
     state.accumulatedDamage = QRegion();
-}
-
-void ScreencopyPlugin::handleFrameDestroyed(ScreencopyFrameV1Interface *frame)
-{
-    auto it = m_outputStates.find(frame->output()->handle());
-    if (it == m_outputStates.end())
-        return;
-
-    it->pending.removeIf([frame](const CopyRequest &item) {
-        return item.frame == frame;
-    });
 }
 
 } // namespace KWin

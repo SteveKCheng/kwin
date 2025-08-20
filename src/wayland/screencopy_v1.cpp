@@ -8,6 +8,7 @@
 #include "display.h"
 #include "output.h"
 #include "core/output.h"
+#include "wayland/shmclientbuffer_p.h"
 
 #include <QPointer>
 #include <QImage>
@@ -68,11 +69,20 @@ public:
 
 private:
     ScreencopyFrameV1Interface* const m_parent;
+    void copyRequested(struct ::wl_resource *buffer, bool withDamage);
 
 protected:
     void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override;
-    void zwlr_screencopy_frame_v1_copy(Resource *resource, struct ::wl_resource *buffer) override;
-    void zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, struct ::wl_resource *buffer) override;
+
+    void zwlr_screencopy_frame_v1_copy(Resource *resource, struct ::wl_resource *buffer) override
+    {
+        copyRequested(buffer, false);
+    }
+
+    void zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, struct ::wl_resource *buffer) override
+    {
+        copyRequested(buffer, true);
+    }
 
     void zwlr_screencopy_frame_v1_destroy(Resource *resource) override
     {
@@ -137,14 +147,15 @@ void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_destroy_resourc
     delete m_parent;
 }
 
-void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_copy(Resource *resource, wl_resource *buffer)
+void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool withDamage)
 {
-    Q_EMIT m_parent->copyRequested(buffer, false);
-}
+    auto* shmBuffer = ShmClientBuffer::get(buffer);
+    if (!shmBuffer) {
+        send_failed();
+        return;
+    }
 
-void ScreencopyFrameV1InterfacePrivate::zwlr_screencopy_frame_v1_copy_with_damage(Resource *resource, wl_resource *buffer)
-{
-    Q_EMIT m_parent->copyRequested(buffer, true);
+    m_parent->copyRequested(shmBuffer, withDamage);
 }
 
 //
@@ -164,14 +175,14 @@ ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 //
 
 ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResource,
-                                                       OutputInterface* output,
+                                                       OutputInterface* outputInterface,
                                                        const QRect &region,
                                                        bool includeCursor,
                                                        ScreencopyManagerV1Interface *parent)
     : QObject(parent)
     , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this))
 {
-    d->output = output;
+    d->output = outputInterface;
     d->region = QRect(); // Empty means full output
     d->includeCursor = includeCursor;
     d->init(frameResource);

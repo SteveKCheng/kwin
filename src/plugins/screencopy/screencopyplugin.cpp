@@ -73,35 +73,62 @@ public:
     {
     }
 
-private:
     ScreencopyPlugin* const m_parent;
 
 protected:
     ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
                                             const QRect &frameBox,
                                             wl_resource* frameResource,
-                                            OutputInterface* outputInterface) override
-    {
-        auto* frameInterface = new ScreencopyFrameV1Interface(frameResource,
-                                                              outputInterface,
-                                                              QRect(),
-                                                              overlayCursor,
-                                                              this);
-
-        // Send buffer format information
-        Output *output = outputInterface->handle();
-        QSize outputSize = output->pixelSize();
-        uint32_t format = WL_SHM_FORMAT_ARGB8888;
-        uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
-
-        frameInterface->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
-        frameInterface->sendBufferDone();
-
-        m_parent->handleFrameRequested(frameInterface);
-
-        return frameInterface;
-    }
+                                            OutputInterface* outputInterface) override;
 };
+
+class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface
+{
+public:
+    ScreencopyFrameImpl(wl_resource* frameResource,
+                        OutputInterface* outputInterface,
+                        const QRect &region,
+                        bool includeCursor,
+                        ScreencopyManagerImpl *parent);
+private:
+    ScreencopyPlugin* const plugin;
+
+protected:
+    void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
+};
+
+ScreencopyFrameV1Interface*
+ScreencopyManagerImpl::createFrame(bool overlayCursor,
+                                   const QRect &frameBox,
+                                   wl_resource* frameResource,
+                                   OutputInterface* outputInterface)
+{
+    return new ScreencopyFrameImpl(frameResource,
+                                   outputInterface,
+                                   QRect(),
+                                   overlayCursor,
+                                   this);
+}
+
+ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
+                                         OutputInterface *outputInterface,
+                                         const QRect &region,
+                                         bool includeCursor,
+                                         ScreencopyManagerImpl *parent)
+    : ScreencopyFrameV1Interface(frameResource, outputInterface, region, includeCursor, parent)
+    , plugin(parent->m_parent)
+{
+    // Send buffer format information
+    Output *output = outputInterface->handle();
+    QSize outputSize = output->pixelSize();
+    uint32_t format = WL_SHM_FORMAT_ARGB8888;
+    uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
+
+    sendBuffer(format, outputSize.width(), outputSize.height(), stride);
+    sendBufferDone();
+
+    plugin->handleFrameRequested(this);
+}
 
 ScreencopyPlugin::ScreencopyPlugin()
     : m_screencopyManager(std::make_unique<ScreencopyManagerImpl>(waylandServer()->display(), this))
@@ -124,41 +151,34 @@ struct ScreencopyPlugin::CopyRequest
     QPointer<ShmClientBuffer> shmBuffer;
 };
 
+void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool waitForDamage)
+{
+    if (waitForDamage) {
+        // Set up output tracking if not already done
+        plugin->setupOutputTracking(output());
+
+        Output *output = this->output()->handle();
+        auto &state = plugin->m_outputStates[output];
+
+        state.pending.push_back({this, clientBuffer});
+
+        // If we already have accumulated damage, process it immediately
+        if (!state.accumulatedDamage.isEmpty()) {
+            plugin->processFramesForOutput(state);
+        }
+        // If no accumulated damage, the frame will be processed when next damage occurs
+    } else {
+        // For regular copy, do immediate copy
+        performCopy(this, *clientBuffer);
+    }
+}
+
 void ScreencopyPlugin::handleFrameRequested(ScreencopyFrameV1Interface *frame)
 {
     // Set up tracking for frame destruction
     connect(frame, &ScreencopyFrameV1Interface::destroyed,
             this, [this, frame]() {
                 handleFrameDestroyed(frame);
-            });
-    
-    // Connect to the copy request signal to handle actual copying
-    connect(frame, &ScreencopyFrameV1Interface::copyRequested,
-            this, [this, frame](wl_resource *buffer, bool withDamage) {
-                auto* shmBuffer = ShmClientBuffer::get(buffer);
-                if (!shmBuffer) {
-                    frame->sendFailed();
-                    return;
-                }
-
-                if (withDamage) {
-                    // Set up output tracking if not already done
-                    setupOutputTracking(frame->output());
-                    
-                    Output *output = frame->output()->handle();
-                    OutputState &state = m_outputStates[output];
-
-                    state.pending.push_back(CopyRequest{frame, shmBuffer});
-
-                    // If we already have accumulated damage, process it immediately
-                    if (!state.accumulatedDamage.isEmpty()) {
-                        processFramesForOutput(state);
-                    }
-                    // If no accumulated damage, the frame will be processed when next damage occurs
-                } else {
-                    // For regular copy, do immediate copy
-                    performCopy(frame, *shmBuffer);
-                }
             });
 }
 

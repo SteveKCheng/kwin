@@ -34,6 +34,9 @@ private Q_SLOTS:
     void handleFrameDestroyed(ScreencopyFrameV1Interface *frame);
 
 private:
+    const std::unique_ptr<ScreencopyManagerV1Interface> m_screencopyManager;
+
+public:
     struct CopyRequest;
 
     // Per-output damage tracking
@@ -43,12 +46,10 @@ private:
         bool connected = false;        // Whether we're connected to damage signals
     };
 
+    QHash<Output*, OutputState> m_outputStates;           // Track state for each output
+
     void processFramesForOutput(OutputState &state);
     void setupOutputTracking(OutputInterface *outputInterface);
-
-    const std::unique_ptr<ScreencopyManagerV1Interface> m_screencopyManager;
-
-    QHash<Output*, OutputState> m_outputStates;           // Track state for each output
 };
 
 } // namespace KWin

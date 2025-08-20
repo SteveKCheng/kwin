@@ -23,6 +23,7 @@ class OutputInterface;
 class ScreencopyManagerV1InterfacePrivate;
 class ScreencopyFrameV1InterfacePrivate;
 class ScreencopyFrameV1Interface;
+class ShmClientBuffer;
 
 /**
  * The ScreencopyManagerV1Interface provides wlroots screencopy protocol support.
@@ -80,6 +81,12 @@ class KWIN_EXPORT ScreencopyFrameV1Interface : public QObject
     Q_OBJECT
 
 public:
+    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
+                                        OutputInterface* outputInterface,
+                                        const QRect &region,
+                                        bool includeCursor,
+                                        ScreencopyManagerV1Interface *parent);
+
     ~ScreencopyFrameV1Interface() override;
 
     /**
@@ -102,6 +109,7 @@ public:
      */
     bool waitForDamage() const;
 
+public:
     /**
      * Send buffer format information to the client.
      * This should be called for each supported buffer type.
@@ -134,23 +142,14 @@ public:
      */
     void sendFailed();
 
+    virtual void copyRequested(ShmClientBuffer* clientBuffer, bool waitForDamage) = 0;
+
 Q_SIGNALS:
-    /**
-     * Emitted when the client requests a copy operation.
-     */
-    void copyRequested(wl_resource *buffer, bool waitForDamage);
 
     /**
      * Emitted when the frame is destroyed.
      */
     void destroyed();
-
-public:
-    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
-                                        OutputInterface* output,
-                                        const QRect &region,
-                                        bool includeCursor,
-                                        ScreencopyManagerV1Interface *parent);
 
 private:
     friend class ScreencopyFrameV1InterfacePrivate;

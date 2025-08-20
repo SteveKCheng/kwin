@@ -10,18 +10,20 @@
 
 #include "wayland_server.h"
 #include "compositor.h"
+#include "cursor.h"
+#include "main.h"
 #include "core/output.h"
-#include "core/renderloop.h"
 #include "core/graphicsbuffer.h"
 #include "wayland/shmclientbuffer_p.h"
 #include "../screencast/screencastutils.h"
 
 #include <QImage>
 #include <QObject>
+#include <QPainter>
+
 #include <chrono>
 #include "opengl/glutils.h"
 
-// Include the generated protocol header for flag definitions
 #include "qwayland-server-wlr-screencopy-unstable-v1.h"
 
 namespace KWin
@@ -58,6 +60,8 @@ public:
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
+    void handleCursorChanged(Cursor* cursor);
+    void handleCursorMoved(Cursor *cursor, const QPointF &position);
 
 private:
     /**
@@ -69,6 +73,12 @@ private:
      * @brief Whether the cursor should be rendered as part of the frame.
      */
     const bool m_overlayCursor;
+
+    /**
+     * @brief True if the cursor has been invalidated or has moved since the last
+     *        "ready" event was fired.
+     */
+    bool m_cursorHasChanged = false;
 
     /**
      * @brief Set up connections to the underlying Output to watch for changes.
@@ -94,22 +104,40 @@ private:
      *
      * All of the frame will be rendered; this method does not clip the output
      * to (the bounding box of) acccumulatedDamage.
+     *
+     * This method also updates m_lastCursorBox as part of rendering the
+     * cursor as part of the frame.
      */
     void renderToBuffer(ShmClientBuffer &clientBuffer);
+
+    /**
+     * @brief Mark the buffer as ready, and update internal tracking variables.
+     */
+    void finishUpdate();
 
     /**
      * @brief The region of the Output that has changed since the last "ready" event
      *        was fired.
      *
      * This region is expressed in physical (scaled) coordinates.
+     *
+     * This region does not include the overlaid cursor; that is tracked separately.
      */
-    QRegion accumulatedDamage;
+    QRegion m_accumulatedDamage;
 
     /**
      * @brief The shared-memory buffer captured from the client when it calls
      *        \c copy or \c copy_with_damage for a frame.
      */
-    QPointer<ShmClientBuffer> capturedShmBuffer;
+    QPointer<ShmClientBuffer> m_capturedShmBuffer;
+
+    /**
+     * @brief The position and extents of the cursor when
+     *        it was rendered last and sent to the client.
+     *
+     * This region is expressed in physical (scaled) coordinates.
+     */
+    QRect m_lastCursorBox;
 
 protected:
     void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
@@ -157,23 +185,18 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
         return;
     }
 
-    if (capturedShmBuffer) {
+    if (m_capturedShmBuffer) {
         // zwlr_screencopy_frame_v1::error::already_used
         sendFailed();
         return;
     }
 
     if (waitForDamage) {
-        capturedShmBuffer = clientBuffer;
-
-        // If we already have accumulated updates, send to the client right away
-        if (!accumulatedDamage.isEmpty())
-            sendUpdatedContents();
-
+        m_capturedShmBuffer = clientBuffer;
+        sendUpdatedContents();
     } else {
-        // For regular copy, do immediate copy
         renderToBuffer(*clientBuffer);
-        accumulatedDamage = QRegion();
+        finishUpdate();
     }
 }
 
@@ -183,33 +206,57 @@ void ScreencopyFrameImpl::trackOutput()
         return;
 
     connect(m_output.get(), &Output::outputChange, this, &ScreencopyFrameImpl::handleOutputChange);
+
+    if (m_overlayCursor) {
+        auto* cursors = Cursors::self();
+        connect(cursors, &Cursors::currentCursorChanged, this, &ScreencopyFrameImpl::handleCursorChanged);
+        connect(cursors, &Cursors::positionChanged, this, &ScreencopyFrameImpl::handleCursorMoved);
+    }
 }
 
 void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
 {
     auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
-    accumulatedDamage = accumulatedDamage.united(damagePhysical);
+    m_accumulatedDamage = m_accumulatedDamage.united(damagePhysical);
 
+    sendUpdatedContents();
+}
+
+void ScreencopyFrameImpl::handleCursorChanged(Cursor* cursor)
+{
+    m_cursorHasChanged = true;
+    sendUpdatedContents();
+}
+
+void ScreencopyFrameImpl::handleCursorMoved(Cursor *cursor, const QPointF &position)
+{
+    m_cursorHasChanged = true;
     sendUpdatedContents();
 }
 
 void ScreencopyFrameImpl::sendUpdatedContents()
 {
-    auto* clientBuffer = capturedShmBuffer.get();
+    // Skip if there are no updates
+    if (m_accumulatedDamage.isEmpty() && !m_cursorHasChanged)
+        return;
+
+    auto* clientBuffer = m_capturedShmBuffer.get();
     if (clientBuffer == nullptr)
         return;
 
-    QRect boundingRect = accumulatedDamage.boundingRect();
+    QRect boundingRect = m_accumulatedDamage.boundingRect();
 
     // Send damage event(s).  The protocol specification says these events
     // must come "right before" the "ready" event, but really the client
     // cannot read the frame until we send the "ready" event so it should
     // be okay to send them earlier, before we start writing to the client's
-    // buffer.  This avoids having to split the code for "mark frame as ready"
-    // away from the helper function performCopy, which is shared for
-    // full-frame copies.
-    sendDamage(boundingRect.x(), boundingRect.y(),
-               boundingRect.width(), boundingRect.height());
+    // buffer.
+    sendDamage(boundingRect);
+
+    // Old location of cursor is damaged
+    if (m_overlayCursor && m_lastCursorBox.isValid()) {
+        sendDamage(m_lastCursorBox);
+    }
 
     // One would be tempted to think that copy_with_damage allows the server
     // to optimize out the copying of pixels that are not contained in the
@@ -229,8 +276,12 @@ void ScreencopyFrameImpl::sendUpdatedContents()
     // size of the screen.
     renderToBuffer(*clientBuffer);
 
-    accumulatedDamage = QRegion();
-    capturedShmBuffer = nullptr;
+    // New location of cursor is also damaged
+    if (m_overlayCursor && m_lastCursorBox.isValid()) {
+        sendDamage(m_lastCursorBox);
+    }
+
+    finishUpdate();
 }
 
 void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
@@ -261,14 +312,35 @@ void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
 
     grabTexture(texture.get(), &frameImage);
 
+    if (m_overlayCursor) {
+        const Cursor* cursor = Cursors::self()->currentCursor();
+        const QImage cursorImage = kwinApp()->cursorImage().image();
+        if (cursor != nullptr && !cursorImage.isNull()) {
+            const QRectF cursorRect = scaledRect(cursor->geometry(), output->scale());
+            QPainter painter(&frameImage);
+            painter.drawImage(cursorRect, cursorImage);
+            m_lastCursorBox = cursorRect.toAlignedRect();
+        } else {
+            m_lastCursorBox = QRect();
+        }
+    }
+
     // Unmap the buffer
     clientBuffer.unmap();
+}
+
+void
+ScreencopyFrameImpl::finishUpdate()
+{
+    m_accumulatedDamage = QRegion();
+    m_cursorHasChanged = false;
+    m_capturedShmBuffer = nullptr;
 
     // Send completion events - no Y_INVERT flag needed since grabTexture handles it
     sendFlags(0);
 
     // Send timestamp using the output's presentation timestamp
-    auto timestamp = output->renderLoop()->lastPresentationTimestamp();
+    auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
     sendReady(timestamp);
 }
 

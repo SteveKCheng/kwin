@@ -103,7 +103,7 @@ protected:
     /**
      * Send damage information when using copy_with_damage.
      */
-    void sendDamage(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+    void sendDamage(const QRect &rect);
 
     /**
      * Send flags about the captured frame.

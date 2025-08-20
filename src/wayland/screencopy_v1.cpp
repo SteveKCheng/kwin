@@ -203,9 +203,9 @@ void ScreencopyFrameV1Interface::sendFlags(uint32_t flags)
     d->send_flags(flags);
 }
 
-void ScreencopyFrameV1Interface::sendDamage(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+void ScreencopyFrameV1Interface::sendDamage(const QRect &rect)
 {
-    d->send_damage(x, y, width, height);
+    d->send_damage(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
 void ScreencopyFrameV1Interface::sendReady(std::chrono::nanoseconds timestamp)

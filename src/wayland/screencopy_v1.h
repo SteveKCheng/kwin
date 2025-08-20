@@ -9,11 +9,8 @@
 #include "kwin_export.h"
 
 #include <QObject>
-#include <QRegion>
-#include <memory>
 
 struct wl_resource;
-struct wl_buffer;
 
 namespace KWin
 {

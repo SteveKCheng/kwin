@@ -4,27 +4,23 @@
     SPDX-License-Identifier: LGPL-2.0-or-later
 */
 
-#include "screencopyplugin.h"
-#include "wayland/screencopy_v1.h"
-#include "wayland/output.h"
+#include <QPainter>
+#include <chrono>
 
+#include "screencopyplugin.h"
+#include "wayland/output.h"
+#include "wayland/screencopy_v1.h"
+#include "wayland/shmclientbuffer_p.h"
 #include "wayland_server.h"
+
+#include "core/output.h"
+#include "core/graphicsbuffer.h"
+
 #include "compositor.h"
 #include "cursor.h"
 #include "main.h"
-#include "core/output.h"
-#include "core/graphicsbuffer.h"
-#include "wayland/shmclientbuffer_p.h"
+
 #include "../screencast/screencastutils.h"
-
-#include <QImage>
-#include <QObject>
-#include <QPainter>
-
-#include <chrono>
-#include "opengl/glutils.h"
-
-#include "qwayland-server-wlr-screencopy-unstable-v1.h"
 
 namespace KWin
 {

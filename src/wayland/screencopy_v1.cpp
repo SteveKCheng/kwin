@@ -10,10 +10,7 @@
 #include "core/output.h"
 #include "wayland/shmclientbuffer_p.h"
 
-#include <QPointer>
-#include <QImage>
 #include <chrono>
-#include <drm_fourcc.h>
 
 #include "qwayland-server-wlr-screencopy-unstable-v1.h"
 

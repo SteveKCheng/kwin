@@ -85,11 +85,10 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    auto frameInterface = new ScreencopyFrameV1Interface(frameResource,
-                                                         outputInterface,
-                                                         QRect(),
-                                                         overlay_cursor != 0,
-                                                         m_parent);
+    auto frameInterface = m_parent->createFrame(overlay_cursor != 0,
+                                                QRect(),
+                                                frameResource,
+                                                outputInterface);
 
     // Send buffer format information
     Output *output = outputInterface->handle();
@@ -170,6 +169,19 @@ ScreencopyManagerV1Interface::ScreencopyManagerV1Interface(Display *display, QOb
 
 ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface()
 {
+}
+
+ScreencopyFrameV1Interface*
+ScreencopyManagerV1Interface::createFrame(bool overlayCursor,
+                                          const QRect &frameBox,
+                                          wl_resource* frameResource,
+                                          OutputInterface* output)
+{
+    return new ScreencopyFrameV1Interface(frameResource,
+                                          output,
+                                          QRect(),
+                                          overlayCursor,
+                                          this);
 }
 
 ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResource,

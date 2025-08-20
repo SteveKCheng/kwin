@@ -48,7 +48,32 @@ Q_SIGNALS:
     void frameRequested(ScreencopyFrameV1Interface *frame);
 
 private:
+    friend class ScreencopyManagerV1InterfacePrivate;
     std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
+
+protected:
+    /**
+     * @brief Instantiate a concrete implementation of ScreencopyFrameV1Interface.
+     *
+     * This factory method is called in response to the method
+     * @c capture_output and @c capture_output_region of the @c zwlr_screencopy_manager_v1
+     * interface.
+     *
+     * @param overlayCursor Whether to render the mouse cursor as part of the captured frame.
+     * @param frameBox The rectangular subset of the output that the client requested to
+     *                 capture.
+     * @param frameResource The newly instantiated Wayland resource for
+     *                      the @c zwlr_screencopy_frame_v1 interface.  This argument
+     *                      should be passed directly to the constructor of
+     *                      ScreencopyFrameV1Interface.
+     * @param output The Wayland output that the client requested to capture.
+     *
+     * @return Newly instantiated implementation of ScreencopyFrameV1Interface.
+     */
+    virtual ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
+                                                    const QRect &frameBox,
+                                                    wl_resource* frameResource,
+                                                    OutputInterface* output);
 };
 
 /**

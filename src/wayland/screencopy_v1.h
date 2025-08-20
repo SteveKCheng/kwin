@@ -17,9 +17,9 @@ struct wl_buffer;
 
 namespace KWin
 {
+
 class Display;
 class OutputInterface;
-class ShmClientBuffer;
 class ScreencopyManagerV1InterfacePrivate;
 class ScreencopyFrameV1InterfacePrivate;
 class ScreencopyFrameV1Interface;
@@ -40,11 +40,6 @@ class KWIN_EXPORT ScreencopyManagerV1Interface : public QObject
 public:
     explicit ScreencopyManagerV1Interface(Display *display, QObject *parent = nullptr);
     ~ScreencopyManagerV1Interface() override;
-
-    /**
-     * Returns the Wayland display for the screencopy manager.
-     */
-    Display *display() const;
 
 Q_SIGNALS:
     /**
@@ -136,10 +131,14 @@ Q_SIGNALS:
      */
     void destroyed();
 
-private:
-    friend class ScreencopyManagerV1InterfacePrivate;
-    explicit ScreencopyFrameV1Interface(OutputInterface *output, const QRect &region, bool includeCursor, QObject *parent = nullptr);
+public:
+    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
+                                        OutputInterface* output,
+                                        const QRect &region,
+                                        bool includeCursor,
+                                        ScreencopyManagerV1Interface *parent);
 
+private:
     std::unique_ptr<ScreencopyFrameV1InterfacePrivate> d;
 };
 

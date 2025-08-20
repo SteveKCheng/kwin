@@ -39,14 +39,11 @@ class KWIN_EXPORT ScreencopyManagerV1Interface : public QObject
     Q_OBJECT
 
 public:
-    explicit ScreencopyManagerV1Interface(Display *display, QObject *parent);
     ~ScreencopyManagerV1Interface() override;
 
-private:
-    friend class ScreencopyManagerV1InterfacePrivate;
-    const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
-
 protected:
+    explicit ScreencopyManagerV1Interface(Display *display, QObject *parent);
+
     /**
      * @brief Instantiate a concrete implementation of ScreencopyFrameV1Interface.
      *
@@ -69,6 +66,10 @@ protected:
                                                     const QRect &frameBox,
                                                     wl_resource* frameResource,
                                                     OutputInterface* output) = 0;
+
+private:
+    friend class ScreencopyManagerV1InterfacePrivate;
+    const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
 };
 
 /**
@@ -81,35 +82,12 @@ class KWIN_EXPORT ScreencopyFrameV1Interface : public QObject
     Q_OBJECT
 
 public:
-    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
-                                        OutputInterface* outputInterface,
-                                        const QRect &region,
-                                        bool includeCursor,
-                                        ScreencopyManagerV1Interface *parent);
-
     ~ScreencopyFrameV1Interface() override;
 
-    /**
-     * Returns the output that should be captured.
-     */
-    OutputInterface *output() const;
-
-    /**
-     * Returns the region to capture, or an invalid QRect for full output capture.
-     */
-    QRect region() const;
-
-    /**
-     * Returns true if the cursor should be included in the capture.
-     */
-    bool includesCursor() const;
-
-    /**
-     * Returns true if copy_with_damage was requested instead of copy.
-     */
-    bool waitForDamage() const;
-
 protected:
+    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
+                                        ScreencopyManagerV1Interface *parent);
+
     /**
      * Send buffer format information to the client.
      * This should be called for each supported buffer type.

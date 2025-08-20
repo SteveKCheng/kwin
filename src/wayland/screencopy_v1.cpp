@@ -63,10 +63,6 @@ public:
     {
     }
 
-    QPointer<OutputInterface> output;
-    QRect region;
-    bool includeCursor = false;
-
 private:
     ScreencopyFrameV1Interface* const m_parent;
     void copyRequested(struct ::wl_resource *buffer, bool withDamage);
@@ -173,35 +169,14 @@ ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 //
 
 ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResource,
-                                                       OutputInterface* outputInterface,
-                                                       const QRect &region,
-                                                       bool includeCursor,
                                                        ScreencopyManagerV1Interface *parent)
     : QObject(parent)
     , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this))
 {
-    d->output = outputInterface;
-    d->region = QRect(); // Empty means full output
-    d->includeCursor = includeCursor;
     d->init(frameResource);
 }
 
 ScreencopyFrameV1Interface::~ScreencopyFrameV1Interface() = default;
-
-OutputInterface *ScreencopyFrameV1Interface::output() const
-{
-    return d->output.get();
-}
-
-QRect ScreencopyFrameV1Interface::region() const
-{
-    return d->region;
-}
-
-bool ScreencopyFrameV1Interface::includesCursor() const
-{
-    return d->includeCursor;
-}
 
 void ScreencopyFrameV1Interface::sendBuffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride)
 {
@@ -218,14 +193,19 @@ void ScreencopyFrameV1Interface::sendBufferDone()
     d->send_buffer_done();
 }
 
-void ScreencopyFrameV1Interface::sendDamage(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+void ScreencopyFrameV1Interface::sendFailed()
 {
-    d->send_damage(x, y, width, height);
+    d->send_failed();
 }
 
 void ScreencopyFrameV1Interface::sendFlags(uint32_t flags)
 {
     d->send_flags(flags);
+}
+
+void ScreencopyFrameV1Interface::sendDamage(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    d->send_damage(x, y, width, height);
 }
 
 void ScreencopyFrameV1Interface::sendReady(std::chrono::nanoseconds timestamp)
@@ -235,11 +215,6 @@ void ScreencopyFrameV1Interface::sendReady(std::chrono::nanoseconds timestamp)
     uint32_t tv_sec_lo = tv_sec & 0xFFFFFFFF;
     uint32_t tv_nsec = (timestamp % std::chrono::seconds(1)).count();
     d->send_ready(tv_sec_hi, tv_sec_lo, tv_nsec);
-}
-
-void ScreencopyFrameV1Interface::sendFailed()
-{
-    d->send_failed();
 }
 
 } // namespace KWin

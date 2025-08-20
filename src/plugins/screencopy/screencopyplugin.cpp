@@ -50,16 +50,26 @@ class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface
 {
     Q_OBJECT
 public:
-    ScreencopyFrameImpl(wl_resource* frameResource,
+    ScreencopyFrameImpl(bool overlayCursor,
+                        const QRect &frameBox,
+                        wl_resource* frameResource,
                         OutputInterface* outputInterface,
-                        const QRect &region,
-                        bool includeCursor,
                         ScreencopyManagerImpl *parent);
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
 
 private:
+    /**
+     * @brief The display output that is being captured by this frame.
+     */
+    const QPointer<Output> m_output;
+
+    /**
+     * @brief Whether the cursor should be rendered as part of the frame.
+     */
+    const bool m_overlayCursor;
+
     /**
      * @brief Set up connections to the underlying Output to watch for changes.
      *
@@ -111,22 +121,24 @@ ScreencopyManagerImpl::createFrame(bool overlayCursor,
                                    wl_resource* frameResource,
                                    OutputInterface* outputInterface)
 {
-    return new ScreencopyFrameImpl(frameResource,
+    return new ScreencopyFrameImpl(overlayCursor,
+                                   frameBox,
+                                   frameResource,
                                    outputInterface,
-                                   QRect(),
-                                   overlayCursor,
                                    this);
 }
 
-ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
+ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
+                                         const QRect &frameBox,
+                                         wl_resource *frameResource,
                                          OutputInterface *outputInterface,
-                                         const QRect &region,
-                                         bool includeCursor,
                                          ScreencopyManagerImpl *parent)
-    : ScreencopyFrameV1Interface(frameResource, outputInterface, region, includeCursor, parent)
+    : ScreencopyFrameV1Interface(frameResource, parent)
+    , m_output(outputInterface->handle())
+    , m_overlayCursor(overlayCursor)
 {
     // Send buffer format information
-    Output *output = outputInterface->handle();
+    Output *output = m_output.get();
     QSize outputSize = output->pixelSize();
     uint32_t format = WL_SHM_FORMAT_ARGB8888;
     uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
@@ -140,7 +152,7 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(wl_resource *frameResource,
 void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool waitForDamage)
 {
     // Fail if output has already gone away.
-    if (!output()) {
+    if (!m_output) {
         sendFailed();
         return;
     }
@@ -167,16 +179,15 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
 
 void ScreencopyFrameImpl::trackOutput()
 {
-    Output* output = this->output()->handle();
-    if (!output)
+    if (!m_output)
         return;
 
-    connect(output, &Output::outputChange, this, &ScreencopyFrameImpl::handleOutputChange);
+    connect(m_output.get(), &Output::outputChange, this, &ScreencopyFrameImpl::handleOutputChange);
 }
 
 void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
 {
-    auto damagePhysical = scaleRegion(damageLogical, output()->handle()->scale());
+    auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
     accumulatedDamage = accumulatedDamage.united(damagePhysical);
 
     sendUpdatedContents();
@@ -224,7 +235,7 @@ void ScreencopyFrameImpl::sendUpdatedContents()
 
 void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
 {
-    Output* output = this->output()->handle();
+    Output* output = m_output.get();
 
     // Get the compositor texture for the output
     auto [texture, color] = Compositor::self()->textureForOutput(output);

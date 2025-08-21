@@ -59,6 +59,7 @@ private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
     void handleCursorChanged(Cursor* cursor);
     void handleCursorMoved(Cursor *cursor, const QPointF &position);
+    void handleCursorHidden();
 
 private:
     /**
@@ -235,6 +236,7 @@ void ScreencopyFrameImpl::trackOutput()
     if (m_overlayCursor) {
         auto* cursors = Cursors::self();
         connect(cursors, &Cursors::currentCursorChanged, this, &ScreencopyFrameImpl::handleCursorChanged);
+        connect(cursors, &Cursors::hiddenChanged, this, &ScreencopyFrameImpl::handleCursorHidden);
         connect(cursors, &Cursors::positionChanged, this, &ScreencopyFrameImpl::handleCursorMoved);
     }
 }
@@ -248,6 +250,12 @@ void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
 }
 
 void ScreencopyFrameImpl::handleCursorChanged(Cursor* cursor)
+{
+    m_cursorHasChanged = true;
+    sendUpdatedContents(false);
+}
+
+void ScreencopyFrameImpl::handleCursorHidden()
 {
     m_cursorHasChanged = true;
     sendUpdatedContents(false);

@@ -275,8 +275,10 @@ void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
 
     // Cannot do anything if the client destroyed the buffer.
     auto* clientBuffer = m_capturedShmBuffer.get();
-    if (clientBuffer == nullptr)
+    if (clientBuffer == nullptr) {
+        m_capturedShmBuffer = nullptr;  // drop the weak reference
         return;
+    }
 
     // Rate-limiting: check if enough time has passed since last frame
     if (!immediate) {
@@ -298,6 +300,9 @@ void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
             return;
         }
     }
+
+    // Drop the buffer even if there is an error in rendering it
+    m_capturedShmBuffer = nullptr;
 
     // Save old location of cursor
     auto prevCursorBox = m_lastCursorBox;
@@ -389,7 +394,6 @@ ScreencopyFrameImpl::finishUpdate()
 {
     m_accumulatedDamage.setRects(QSpan<QRect>());   // clear
     m_cursorHasChanged = false;
-    m_capturedShmBuffer = nullptr;
 
     // Send completion events - no Y_INVERT flag needed since grabTexture handles it
     sendFlags(0);

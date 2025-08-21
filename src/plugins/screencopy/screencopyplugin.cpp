@@ -242,7 +242,7 @@ void ScreencopyFrameImpl::trackOutput()
 void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
 {
     auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
-    m_accumulatedDamage = m_accumulatedDamage.united(damagePhysical);
+    m_accumulatedDamage |= damagePhysical;
 
     sendUpdatedContents(false);
 }
@@ -291,19 +291,8 @@ void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
         }
     }
 
-    QRect boundingRect = m_accumulatedDamage.boundingRect();
-
-    // Send damage event(s).  The protocol specification says these events
-    // must come "right before" the "ready" event, but really the client
-    // cannot read the frame until we send the "ready" event so it should
-    // be okay to send them earlier, before we start writing to the client's
-    // buffer.
-    sendDamage(boundingRect);
-
-    // Old location of cursor is damaged
-    if (m_overlayCursor && m_lastCursorBox.isValid()) {
-        sendDamage(m_lastCursorBox);
-    }
+    // Save old location of cursor
+    auto prevCursorBox = m_lastCursorBox;
 
     // One would be tempted to think that copy_with_damage allows the server
     // to optimize out the copying of pixels that are not contained in the
@@ -323,9 +312,20 @@ void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
     // size of the screen.
     renderToBuffer(*clientBuffer);
 
-    // New location of cursor is also damaged
-    if (m_overlayCursor && m_lastCursorBox.isValid()) {
-        sendDamage(m_lastCursorBox);
+    // Accumulate damage for the rendered cursor.
+    if (m_overlayCursor) {
+        if (prevCursorBox.isValid())
+            m_accumulatedDamage += prevCursorBox;
+        if (m_lastCursorBox.isValid())
+            m_accumulatedDamage += m_lastCursorBox;
+    }
+
+    // Send damage event(s).
+    if (m_accumulatedDamage.rectCount() <= 8) {
+        for (const QRect & rect : m_accumulatedDamage)
+            sendDamage(rect);
+    } else {
+        sendDamage(m_accumulatedDamage.boundingRect());
     }
 
     finishUpdate();
@@ -379,7 +379,7 @@ void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
 void
 ScreencopyFrameImpl::finishUpdate()
 {
-    m_accumulatedDamage = QRegion();
+    m_accumulatedDamage.setRects(QSpan<QRect>());   // clear
     m_cursorHasChanged = false;
     m_capturedShmBuffer = nullptr;
 

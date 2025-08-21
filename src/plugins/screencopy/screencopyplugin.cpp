@@ -5,6 +5,7 @@
 */
 
 #include <QPainter>
+#include <QTimer>
 #include <chrono>
 
 #include "screencopyplugin.h"
@@ -91,8 +92,12 @@ private:
      *
      * The damaged region will be cleared afterwards, and the registered client buffer
      * will be de-registered.
+     *
+     * @param immediate   If true, generate an update immediately (if there is one).
+     *                    If false, possibly delay the update to limit the amount
+     *                    of updates that are sent per unit time.
      */
-    void sendUpdatedContents();
+    void sendUpdatedContents(bool immediate);
 
     /**
      * @brief Render the contents of the frame to the given buffer, and
@@ -134,6 +139,28 @@ private:
      * This region is expressed in physical (scaled) coordinates.
      */
     QRect m_lastCursorBox;
+
+    /**
+     * @brief Timestamp when the last "ready" event was sent to the client.
+     *
+     * This is used for rate-limiting frame updates.
+     */
+    std::chrono::nanoseconds m_lastFrameTime{0};
+
+    /**
+     * @brief Minimum time interval between frame updates in milliseconds.
+     *
+     * This helps prevent overwhelming clients like wayvnc that may drop frames
+     * if updates come too frequently.
+     */
+    static constexpr int RATE_LIMIT_MS = 20;
+
+    /**
+     * @brief True if a delayed update is already scheduled.
+     *
+     * This prevents multiple timer callbacks from being scheduled.
+     */
+    bool m_delayedUpdateScheduled = false;
 
 protected:
     void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
@@ -177,19 +204,21 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
 {
     // Fail if output has already gone away.
     if (!m_output) {
+        qWarning() << "output has gone away";
         sendFailed();
         return;
     }
 
     if (m_capturedShmBuffer) {
         // zwlr_screencopy_frame_v1::error::already_used
+        qWarning() << "more than one buffer requested";
         sendFailed();
         return;
     }
 
     if (waitForDamage) {
         m_capturedShmBuffer = clientBuffer;
-        sendUpdatedContents();
+        sendUpdatedContents(true);
     } else {
         renderToBuffer(*clientBuffer);
         finishUpdate();
@@ -215,30 +244,52 @@ void ScreencopyFrameImpl::handleOutputChange(const QRegion &damageLogical)
     auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
     m_accumulatedDamage = m_accumulatedDamage.united(damagePhysical);
 
-    sendUpdatedContents();
+    sendUpdatedContents(false);
 }
 
 void ScreencopyFrameImpl::handleCursorChanged(Cursor* cursor)
 {
     m_cursorHasChanged = true;
-    sendUpdatedContents();
+    sendUpdatedContents(false);
 }
 
 void ScreencopyFrameImpl::handleCursorMoved(Cursor *cursor, const QPointF &position)
 {
     m_cursorHasChanged = true;
-    sendUpdatedContents();
+    sendUpdatedContents(false);
 }
 
-void ScreencopyFrameImpl::sendUpdatedContents()
+void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
 {
     // Skip if there are no updates
     if (m_accumulatedDamage.isEmpty() && !m_cursorHasChanged)
         return;
 
+    // Cannot do anything if the client destroyed the buffer.
     auto* clientBuffer = m_capturedShmBuffer.get();
     if (clientBuffer == nullptr)
         return;
+
+    // Rate-limiting: check if enough time has passed since last frame
+    if (!immediate) {
+        auto currentTime = m_output->renderLoop()->lastPresentationTimestamp();
+        auto timeSinceLastFrame = currentTime - m_lastFrameTime;
+        auto timeSinceLastFrameMs = std::chrono::duration_cast<std::chrono::milliseconds>(timeSinceLastFrame).count();
+        
+        if (timeSinceLastFrameMs < RATE_LIMIT_MS) {
+            // Too soon: schedule a delayed update if not already scheduled
+            if (!m_delayedUpdateScheduled) {
+                auto delayMs = static_cast<int>(RATE_LIMIT_MS - timeSinceLastFrameMs);
+
+                m_delayedUpdateScheduled = true;
+                QTimer::singleShot(delayMs, this, [this]() {
+                    m_delayedUpdateScheduled = false;
+                    sendUpdatedContents(true);
+                });
+            }
+            return;
+        }
+    }
 
     QRect boundingRect = m_accumulatedDamage.boundingRect();
 
@@ -337,6 +388,7 @@ ScreencopyFrameImpl::finishUpdate()
 
     // Send timestamp using the output's presentation timestamp
     auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
+    m_lastFrameTime = timestamp;  // Record for rate limiting
     sendReady(timestamp);
 }
 

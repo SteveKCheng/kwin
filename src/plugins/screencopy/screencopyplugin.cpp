@@ -43,6 +43,12 @@ protected:
                                             const QRect &frameBox,
                                             wl_resource* frameResource,
                                             OutputInterface* outputInterface) override;
+
+    QObject* createClientState() override
+    {
+        return nullptr;
+    }
+
 };
 
 class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface

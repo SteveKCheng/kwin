@@ -31,6 +31,24 @@ public:
 private:
     ScreencopyManagerV1Interface* const m_parent;
 
+    QObject *getOrCreateClientState(wl_resource *manager_resource)
+    {
+        QObject *clientState = static_cast<QObject *>(wl_resource_get_user_data(manager_resource));
+        if (clientState == nullptr) {
+            // Create new client state via factory
+            clientState = m_parent->createClientState();
+            if (clientState != nullptr) {
+                // Attach state to manager resource with automatic cleanup
+                wl_resource_set_user_data(manager_resource, clientState);
+                wl_resource_set_destructor(manager_resource, [](wl_resource *resource) {
+                    QObject *clientState = static_cast<QObject *>(wl_resource_get_user_data(resource));
+                    delete clientState;
+                });
+            }
+        }
+        return clientState;
+    }
+
 protected:
     void zwlr_screencopy_manager_v1_capture_output(Resource *resource,
                                                    uint32_t frame,

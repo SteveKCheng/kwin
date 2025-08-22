@@ -42,6 +42,17 @@ protected:
     explicit ScreencopyManagerV1Interface(Display *display, QObject *parent);
 
     /**
+     * @brief Instantiate a per-client state object.
+     *
+     * This factory method is called once per Wayland client when it first binds to the
+     * screencopy manager. The returned QObject will be automatically deleted when the
+     * client disconnects.
+     *
+     * @return Newly instantiated per-client state object.
+     */
+    virtual QObject *createClientState() = 0;
+
+    /**
      * @brief Instantiate a concrete implementation of ScreencopyFrameV1Interface.
      *
      * This factory method is called in response to the method

@@ -42,7 +42,8 @@ protected:
     ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
                                             const QRect &frameBox,
                                             wl_resource* frameResource,
-                                            OutputInterface* outputInterface) override;
+                                            OutputInterface* outputInterface,
+                                            QObject* clientState) override;
 
     QObject* createClientState() override
     {
@@ -177,7 +178,8 @@ ScreencopyFrameV1Interface*
 ScreencopyManagerImpl::createFrame(bool overlayCursor,
                                    const QRect &frameBox,
                                    wl_resource* frameResource,
-                                   OutputInterface* outputInterface)
+                                   OutputInterface* outputInterface,
+                                   QObject* clientState)
 {
     return new ScreencopyFrameImpl(overlayCursor,
                                    frameBox,

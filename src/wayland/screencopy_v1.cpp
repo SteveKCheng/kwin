@@ -123,10 +123,13 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
+    QObject *clientState = getOrCreateClientState(resource->handle);
+
     m_parent->createFrame(overlay_cursor != 0,
                           QRect(),
                           frameResource,
-                          outputInterface);
+                          outputInterface,
+                          clientState);
 }
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,

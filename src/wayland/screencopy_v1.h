@@ -67,13 +67,15 @@ protected:
      *                      should be passed directly to the constructor of
      *                      ScreencopyFrameV1Interface.
      * @param output The Wayland output that the client requested to capture.
+     * @param clientState The per-client state object created via createClientState().
      *
      * @return Newly instantiated implementation of ScreencopyFrameV1Interface.
      */
     virtual ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
                                                     const QRect &frameBox,
                                                     wl_resource* frameResource,
-                                                    OutputInterface* output) = 0;
+                                                    OutputInterface* output,
+                                                    QObject *clientState) = 0;
 
 private:
     friend class ScreencopyManagerV1InterfacePrivate;

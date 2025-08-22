@@ -174,6 +174,48 @@ protected:
     void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
 };
 
+namespace
+{
+
+class OutputTracking : QObject
+{
+    Q_OBJECT
+
+public:
+    explicit OutputTracking(Output* output);
+
+    void requestCopy(ScreencopyFrameV1Interface* frame, bool waitForDamage);
+
+private Q_SLOTS:
+    //void handleOutputChange(const QRegion &damageLogical);
+    //void handleCursorChanged(Cursor* cursor);
+    //void handleCursorMoved(Cursor *cursor, const QPointF &position);
+    //void handleCursorHidden();
+
+private:
+    bool m_cursorHasChanged = false;
+    QRegion m_accumulatedDamage;
+    QRect m_lastCursorBox;
+    QList<QPointer<ScreencopyFrameImpl>> m_pendingFrames;
+
+    void renderToFramebuffer(ScreencopyFrameV1Interface & frame);
+    void sendUpdatedContents();
+    void finishUpdate();
+};
+
+class ClientState : QObject
+{
+    Q_OBJECT
+
+private:
+    QHash<Output*, std::unique_ptr<OutputTracking>> allOutputs;
+
+public:
+    OutputTracking& getOrCreateOutputTracking(Output* output);
+};
+
+} // anonymous namespace
+
 ScreencopyFrameV1Interface*
 ScreencopyManagerImpl::createFrame(bool overlayCursor,
                                    const QRect &frameBox,

@@ -35,7 +35,19 @@ class OutputTracking : public QObject
 public:
     explicit OutputTracking(Output* output);
 
-    Output* getOutput() const { return m_output.get(); }
+    /**
+     * @brief Get the output that this object is tracking.
+     */
+    Output * getOutput() const { return m_output.get(); }
+
+    /**
+     * @brief Implementation of ScreencopySession::prepareFrame for this output.
+     */
+    void prepareFrame(ScreencopyFrameV1Interface* frame);
+
+    /**
+     * @brief Implementation of ScreencopySession::copyFrame for this output.
+     */
     void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage);
 
 private Q_SLOTS:
@@ -287,48 +299,62 @@ void OutputTracking::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDa
     }
 }
 
+void OutputTracking::prepareFrame(ScreencopyFrameV1Interface* frame)
+{
+    // Send buffer format information
+    Output *output = frame->getOutput();
+    QSize outputSize = output->pixelSize();
+    uint32_t format = WL_SHM_FORMAT_ARGB8888;
+    uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
+
+    frame->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
+    frame->sendBufferDone();
+}
+
 class ScreencopySessionImpl : public ScreencopySession
 {
     Q_OBJECT
 
-    std::vector<std::unique_ptr<OutputTracking>> allOutputs;
+    std::vector<std::unique_ptr<OutputTracking>> m_allOutputs;
 
-    OutputTracking& getOrCreateOutputTracking(Output* output)
+    OutputTracking* getOutputTracking(Output* output, bool createIfMissing)
     {
         auto iter = std::find_if(
-            allOutputs.begin(),
-            allOutputs.end(),
+            m_allOutputs.begin(),
+            m_allOutputs.end(),
             [output](std::unique_ptr<OutputTracking> & item) {
                 return item->getOutput() == output;
             });
 
-        if (iter == allOutputs.end()) {
-            allOutputs.push_back(std::make_unique<OutputTracking>(output));
-            iter = allOutputs.end() - 1;
+        if (iter == m_allOutputs.end()) {
+            if (!createIfMissing) {
+                return nullptr;
+            }
+
+            m_allOutputs.push_back(std::make_unique<OutputTracking>(output));
+            iter = m_allOutputs.end() - 1;
         }
 
-        return *iter->get();
+        return iter->get();
     }
 
 public:
     void prepareFrame(ScreencopyFrameV1Interface* frame) override
     {
-        // Send buffer format information
-        Output *output = frame->getOutput();
-        QSize outputSize = output->pixelSize();
-        uint32_t format = WL_SHM_FORMAT_ARGB8888;
-        uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
-
-        frame->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
-        frame->sendBufferDone();
-
-        getOrCreateOutputTracking(output);
+        auto* outputTracking = getOutputTracking(frame->getOutput(), true);
+        outputTracking->prepareFrame(frame);
     }
 
     void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) override
     {
-        auto& outputTracking = getOrCreateOutputTracking(frame->getOutput());
-        outputTracking.copyFrame(frame, waitForDamage);
+        auto* outputTracking = getOutputTracking(frame->getOutput(), false);
+        if (!outputTracking) {
+            // Output may have gone away
+            frame->sendFailed();
+            return;
+        }
+
+        outputTracking->copyFrame(frame, waitForDamage);
     }
 };
 

@@ -54,29 +54,18 @@ protected:
     virtual QObject *createClientState() = 0;
 
     /**
-     * @brief Instantiate a concrete implementation of ScreencopyFrameV1Interface.
+     * @brief Prepare to capture a frame's contents.
      *
-     * This factory method is called in response to the method
-     * @c capture_output and @c capture_output_region of the @c zwlr_screencopy_manager_v1
-     * interface.
+     * This method should inform the client of the required buffer formats
+     * (through ScreencopyFrameV1Interface::sendBuffer and ScreencopyFrameV1Interface::sendBufferDone),
+     * and set up its own internal tracking of the display output.
      *
-     * @param overlayCursor Whether to render the mouse cursor as part of the captured frame.
-     * @param frameBox The rectangular subset of the output that the client requested to
-     *                 capture.
-     * @param frameResource The newly instantiated Wayland resource for
-     *                      the @c zwlr_screencopy_frame_v1 interface.  This argument
-     *                      should be passed directly to the constructor of
-     *                      ScreencopyFrameV1Interface.
-     * @param output The Wayland output that the client requested to capture.
-     * @param clientState The per-client state object created via createClientState().
-     *
-     * @return Newly instantiated implementation of ScreencopyFrameV1Interface.
+     * @param frame The frame that the Wayland client is asking to capture.
+     * @param clientState The per-client state object created via createClientState(),
+     *                    associated to the Wayland client requesting the frame capture.
      */
-    virtual ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
-                                                    const QRect &frameBox,
-                                                    wl_resource* frameResource,
-                                                    OutputInterface* output,
-                                                    QObject *clientState) = 0;
+    virtual void prepareFrame(ScreencopyFrameV1Interface* frame,
+                              QObject *clientState) = 0;
 
     /**
      * @brief Request for copying one frame from the client.
@@ -86,8 +75,12 @@ protected:
      *                      to be filled immediately.  If true, the Wayland called \c copy_with_damage
      *                      and expects the framebuffer to be filled only when damage is seen on
      *                      the output versus the preceding frame that was copied.
+     * @param clientState The per-client state object created via createClientState(),
+     *                    associated to the Wayland client requesting the copy.
      */
-    virtual void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) = 0;
+    virtual void copyFrame(ScreencopyFrameV1Interface* frame,
+                           bool waitForDamage,
+                           QObject* clientState) = 0;
 
 private:
     friend class ScreencopyManagerV1InterfacePrivate;
@@ -100,7 +93,7 @@ private:
  * 
  * The ScreencopyFrameV1Interface corresponds to the Wayland interface @c zwlr_screencopy_frame_v1.
  */
-class KWIN_EXPORT ScreencopyFrameV1Interface : public QObject
+class KWIN_EXPORT ScreencopyFrameV1Interface final : public QObject
 {
     Q_OBJECT
 
@@ -137,12 +130,6 @@ public:
      */
     ShmClientBuffer* takeShmClientBuffer();
 
-    explicit ScreencopyFrameV1Interface(bool overlayCursor,
-                                        const QRect & frameBox,
-                                        OutputInterface* outputInterface,
-                                        wl_resource* frameResource,
-                                        ScreencopyManagerV1Interface *manager);
-
     /**
      * Send buffer format information to the client.
      * This should be called for each supported buffer type.
@@ -176,7 +163,15 @@ public:
     void sendFailed();
 
 private:
+    explicit ScreencopyFrameV1Interface(bool overlayCursor,
+                                        const QRect & frameBox,
+                                        OutputInterface* outputInterface,
+                                        wl_resource* frameResource,
+                                        QObject* clientState,
+                                        ScreencopyManagerV1Interface *manager);
+
     friend class ScreencopyFrameV1InterfacePrivate;
+    friend class ScreencopyManagerV1InterfacePrivate; // for construction
     const std::unique_ptr<ScreencopyFrameV1InterfacePrivate> d;
 };
 

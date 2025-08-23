@@ -97,9 +97,12 @@ protected:
 class ScreencopyFrameV1InterfacePrivate final : public QtWaylandServer::zwlr_screencopy_frame_v1
 {
 public:
-    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q, ScreencopyManagerV1Interface* manager)
+    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q,
+                                      ScreencopyManagerV1Interface* manager,
+                                      QObject* clientState)
         : m_parent(q)
         , m_manager(manager)
+        , m_clientState(clientState)
     {
     }
 
@@ -122,6 +125,8 @@ private:
      * This manager is the QObject parent of m_parent so it is guaranteed to be alive if this object is.
      */
     ScreencopyManagerV1Interface * const m_manager;
+
+    QObject* const m_clientState;
 
     /**
      * @brief Common code to handle client's request for \c copy and \c copy_with_damage.
@@ -152,7 +157,7 @@ protected:
 };
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output(Resource *resource,
-                                                                                    uint32_t frame,
+                                                                                    uint32_t frame_id,
                                                                                     int32_t overlay_cursor,
                                                                                     wl_resource *output_resource)
 {
@@ -163,7 +168,7 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    wl_resource *frameResource = wl_resource_create(resource->client(), &zwlr_screencopy_frame_v1_interface, resource->version(), frame);
+    wl_resource *frameResource = wl_resource_create(resource->client(), &zwlr_screencopy_frame_v1_interface, resource->version(), frame_id);
     if (!frameResource) {
         wl_resource_post_no_memory(resource->handle);
         return;
@@ -171,11 +176,14 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
 
     QObject *clientState = getClientState(resource->client());
 
-    m_parent->createFrame(overlay_cursor != 0,
-                          QRect(),
-                          frameResource,
-                          outputInterface,
-                          clientState);
+    auto* frame = new ScreencopyFrameV1Interface(overlay_cursor != 0,
+                                                 QRect(),
+                                                 outputInterface,
+                                                 frameResource,
+                                                 clientState,
+                                                 m_parent);
+
+    m_parent->prepareFrame(frame, clientState);
 }
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,
@@ -221,7 +229,7 @@ void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool 
     }
 
     m_shmClientBuffer = shmClientBuffer;
-    m_manager->copyFrame(m_parent, withDamage);
+    m_manager->copyFrame(m_parent, withDamage, m_clientState);
 }
 
 //
@@ -244,9 +252,10 @@ ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(bool overlayCursor,
                                                        const QRect & frameBox,
                                                        OutputInterface* outputInterface,
                                                        wl_resource* frameResource,
+                                                       QObject* clientState,
                                                        ScreencopyManagerV1Interface *manager)
     : QObject(manager)
-    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, manager))
+    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, manager, clientState))
 {
     d->m_output = outputInterface->handle();
     d->m_frameBox = frameBox;

@@ -39,18 +39,14 @@ public:
     ScreencopyPlugin* const m_parent;
 
 protected:
-    ScreencopyFrameV1Interface* createFrame(bool overlayCursor,
-                                            const QRect &frameBox,
-                                            wl_resource* frameResource,
-                                            OutputInterface* outputInterface,
-                                            QObject* clientState) override;
+    void prepareFrame(ScreencopyFrameV1Interface* frame,
+                      QObject *clientState) override;
 
-    QObject* createClientState() override
-    {
-        return nullptr;
-    }
+    QObject* createClientState() override;
 
-    void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) override;
+    void copyFrame(ScreencopyFrameV1Interface* frame,
+                   bool waitForDamage,
+                   QObject* clientState) override;
 };
 
 namespace
@@ -138,7 +134,7 @@ private:
     void sendUpdatedContents();
 };
 
-class ClientState : QObject
+class ClientState : public QObject
 {
     Q_OBJECT
 
@@ -162,19 +158,6 @@ public:
 
         return *iter->get();
     }
-};
-
-class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface
-{
-    Q_OBJECT
-public:
-    ScreencopyFrameImpl(bool overlayCursor,
-                        const QRect &frameBox,
-                        wl_resource* frameResource,
-                        OutputInterface* outputInterface,
-                        ScreencopyManagerImpl *parent);
-
-    std::unique_ptr<OutputTracking> m_outputTracking;
 };
 
 OutputTracking::OutputTracking(Output* output)
@@ -353,44 +336,38 @@ void OutputTracking::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDa
     }
 }
 
-ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
-                                         const QRect &frameBox,
-                                         wl_resource *frameResource,
-                                         OutputInterface *outputInterface,
-                                         ScreencopyManagerImpl *parent)
-    : ScreencopyFrameV1Interface(overlayCursor, frameBox, outputInterface, frameResource, parent)
+} // anonymous namespace
+
+void
+ScreencopyManagerImpl::prepareFrame(ScreencopyFrameV1Interface* frame,
+                                    QObject* clientStateObj)
 {
     // Send buffer format information
-    Output *output = outputInterface->handle();
+    Output *output = frame->getOutput();
     QSize outputSize = output->pixelSize();
     uint32_t format = WL_SHM_FORMAT_ARGB8888;
     uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
 
-    sendBuffer(format, outputSize.width(), outputSize.height(), stride);
-    sendBufferDone();
+    frame->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
+    frame->sendBufferDone();
 
-    m_outputTracking = std::make_unique<OutputTracking>(output);
+    auto* clientState = static_cast<ClientState*>(clientStateObj);
+    clientState->getOrCreateOutputTracking(output);
 }
 
-} // anonymous namespace
-
-ScreencopyFrameV1Interface*
-ScreencopyManagerImpl::createFrame(bool overlayCursor,
-                                   const QRect &frameBox,
-                                   wl_resource* frameResource,
-                                   OutputInterface* outputInterface,
-                                   QObject* clientState)
+QObject*
+ScreencopyManagerImpl::createClientState()
 {
-    return new ScreencopyFrameImpl(overlayCursor,
-                                   frameBox,
-                                   frameResource,
-                                   outputInterface,
-                                   this);
+    return new ClientState();
 }
 
-void ScreencopyManagerImpl::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage)
+void ScreencopyManagerImpl::copyFrame(ScreencopyFrameV1Interface* frame,
+                                      bool waitForDamage,
+                                      QObject* clientStateObj)
 {
-    static_cast<ScreencopyFrameImpl*>(frame)->m_outputTracking->copyFrame(frame, waitForDamage);
+    auto* clientState = static_cast<ClientState*>(clientStateObj);
+    auto& outputTracking = clientState->getOrCreateOutputTracking(frame->getOutput());
+    outputTracking.copyFrame(frame, waitForDamage);
 }
 
 //

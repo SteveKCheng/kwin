@@ -78,8 +78,20 @@ protected:
                                                     OutputInterface* output,
                                                     QObject *clientState) = 0;
 
+    /**
+     * @brief Request for copying one frame from the client.
+     *
+     * @param frame The frame object created by the client that is the target of the framebuffer copy.
+     * @param waitForDamage If false, the Wayland client called \c copy and expects the framebuffer
+     *                      to be filled immediately.  If true, the Wayland called \c copy_with_damage
+     *                      and expects the framebuffer to be filled only when damage is seen on
+     *                      the output versus the preceding frame that was copied.
+     */
+    virtual void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) = 0;
+
 private:
     friend class ScreencopyManagerV1InterfacePrivate;
+    friend class ScreencopyFrameV1InterfacePrivate; // for calling copyFrame
     const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
 };
 
@@ -102,12 +114,12 @@ public:
 
     /**
      *
-     * @brief Get the area of the output that the client requested to capture.
+     * @brief Get the rectangular area of the output that the client requested to capture.
      */
     const QRect & getCapturedArea() const;
 
     /**
-     * @brief Whether the client requested the cursor be overlaid (rendered) onto the frame.
+     * @brief Whether the client requested the (mouse) cursor be overlaid (rendered) onto the frame.
      */
     bool shouldOverlayCursor() const;
 
@@ -129,7 +141,7 @@ public:
                                         const QRect & frameBox,
                                         OutputInterface* outputInterface,
                                         wl_resource* frameResource,
-                                        ScreencopyManagerV1Interface *parent);
+                                        ScreencopyManagerV1Interface *manager);
 
     /**
      * Send buffer format information to the client.
@@ -162,8 +174,6 @@ public:
      * Send failed event to indicate capture failure.
      */
     void sendFailed();
-
-    virtual void copyRequested(bool waitForDamage) = 0;
 
 private:
     friend class ScreencopyFrameV1InterfacePrivate;

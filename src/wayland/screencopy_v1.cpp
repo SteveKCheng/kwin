@@ -75,8 +75,9 @@ protected:
 class ScreencopyFrameV1InterfacePrivate final : public QtWaylandServer::zwlr_screencopy_frame_v1
 {
 public:
-    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q)
+    ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q, ScreencopyManagerV1Interface* manager)
         : m_parent(q)
+        , m_manager(manager)
     {
     }
 
@@ -87,19 +88,34 @@ public:
     QPointer<ShmClientBuffer> m_shmClientBuffer;
 
 private:
-    ScreencopyFrameV1Interface* const m_parent;
+    /**
+     * @brief Pointer to the owner of this private pimpl, required for deletion
+     *        and for passing to ScreencopyManagerV1Interface::copyFrame.
+     */
+    ScreencopyFrameV1Interface * const m_parent;
+
+    /**
+     * @brief Pointer to owning manager, for calling ScreencopyManagerV1Interface::copyFrame.
+     *
+     * This manager is the QObject parent of m_parent so it is guaranteed to be alive if this object is.
+     */
+    ScreencopyManagerV1Interface * const m_manager;
+
+    /**
+     * @brief Common code to handle client's request for \c copy and \c copy_with_damage.
+     */
     void copyRequested(struct ::wl_resource *buffer, bool withDamage);
 
 protected:
     void zwlr_screencopy_frame_v1_destroy_resource(Resource *resource) override
     {
-        // This object is owned by its parent
         delete m_parent;
     }
 
     void zwlr_screencopy_frame_v1_destroy(Resource *resource) override
     {
         wl_resource_destroy(resource->handle);
+        m_shmClientBuffer = nullptr;
     }
 
     void zwlr_screencopy_frame_v1_copy(Resource *resource, struct ::wl_resource *buffer) override
@@ -183,7 +199,7 @@ void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool 
     }
 
     m_shmClientBuffer = shmClientBuffer;
-    m_parent->copyRequested(withDamage);
+    m_manager->copyFrame(m_parent, withDamage);
 }
 
 //
@@ -206,9 +222,9 @@ ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(bool overlayCursor,
                                                        const QRect & frameBox,
                                                        OutputInterface* outputInterface,
                                                        wl_resource* frameResource,
-                                                       ScreencopyManagerV1Interface *parent)
-    : QObject(parent)
-    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this))
+                                                       ScreencopyManagerV1Interface *manager)
+    : QObject(manager)
+    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, manager))
 {
     d->m_output = outputInterface->handle();
     d->m_frameBox = frameBox;

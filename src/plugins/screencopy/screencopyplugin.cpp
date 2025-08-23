@@ -50,6 +50,7 @@ protected:
         return nullptr;
     }
 
+    void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) override;
 };
 
 class ScreencopyFrameImpl final : public ScreencopyFrameV1Interface
@@ -165,8 +166,8 @@ private:
      */
     bool m_delayedUpdateScheduled = false;
 
-protected:
-    void copyRequested(bool waitForDamage) override;
+public:
+    void copyRequested(bool waitForDamage);
 };
 
 namespace
@@ -245,10 +246,15 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
     trackOutput();
 }
 
+void ScreencopyManagerImpl::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage)
+{
+    static_cast<ScreencopyFrameImpl*>(frame)->copyRequested(waitForDamage);
+}
+
 void ScreencopyFrameImpl::copyRequested(bool waitForDamage)
 {
     // Fail if output has already gone away.
-    if (!m_output) {
+    if (getOutput() == nullptr) {
         qWarning() << "output has gone away";
         sendFailed();
         return;

@@ -102,6 +102,30 @@ public:
     ~ScreencopyFrameV1Interface() override;
 
     /**
+     * @brief Grouping of the parameters passed to sendBuffer.
+     *
+     * The parameters of the buffers that are later passed in from the client
+     * must be validated; grouping them as one struct makes it easier to
+     * write that code.
+     */
+    struct BufferFormat
+    {
+        uint32_t pixelFormat;
+        QSize outputSize;
+        int rowStride;
+
+        bool operator==(const BufferFormat &other) const
+        {
+            return pixelFormat == other.pixelFormat && outputSize == other.outputSize && rowStride == other.rowStride;
+        }
+
+        bool operator!=(const BufferFormat &other) const
+        {
+            return !operator==(other);
+        }
+    };
+
+    /**
      * @brief The target display output to capture.
      */
     Output * getOutput() const;
@@ -137,7 +161,7 @@ public:
      * Send buffer format information to the client.
      * This should be called for each supported buffer type.
      */
-    void sendBuffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride);
+    void sendBuffer(const BufferFormat & format);
     void sendLinuxDmabuf(uint32_t format, uint32_t width, uint32_t height);
 
     /**

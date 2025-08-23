@@ -270,9 +270,12 @@ ShmClientBuffer* ScreencopyFrameV1Interface::takeShmClientBuffer()
     return p;
 }
 
-void ScreencopyFrameV1Interface::sendBuffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride)
+void ScreencopyFrameV1Interface::sendBuffer(const BufferFormat & format)
 {
-    return d->send_buffer(format, width, height, stride);
+    return d->send_buffer(format.pixelFormat,
+                          format.outputSize.width(),
+                          format.outputSize.height(),
+                          format.rowStride);
 }
 
 void ScreencopyFrameV1Interface::sendLinuxDmabuf(uint32_t format, uint32_t width, uint32_t height)

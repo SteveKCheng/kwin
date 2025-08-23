@@ -8,6 +8,8 @@
 #include <QTimer>
 #include <chrono>
 
+#include <drm_fourcc.h>
+
 #include "screencopyplugin.h"
 #include "wayland/output.h"
 #include "wayland/screencopy_v1.h"
@@ -121,6 +123,14 @@ private:
      * The damaged region will be cleared afterwards.
      */
     void sendUpdatedContents();
+
+    /**
+     * @brief Get the sole buffer format supported by this implementation,
+     *        for the targeted output.
+     *
+     * This method is factored out for validating the client's buffer's parameters.
+     */
+    ScreencopyFrameV1Interface::BufferFormat getBufferFormat() const;
 };
 
 OutputTracking::OutputTracking(Output* output)
@@ -165,6 +175,16 @@ void OutputTracking::handleCursorMoved(Cursor *cursor, const QPointF &position)
     sendUpdatedContents();
 }
 
+// Reverse the transformation done on the pixel format in ShmAttributes
+uint32_t drmFormatToShmFormat(uint32_t drmFormat)
+{
+    switch (drmFormat) {
+    case DRM_FORMAT_ARGB8888: return WL_SHM_FORMAT_ARGB8888;
+    case DRM_FORMAT_XRGB8888: return WL_SHM_FORMAT_XRGB8888;
+    default: return drmFormat;
+    }
+}
+
 void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
 {
     Output* output = m_output.get();
@@ -183,6 +203,19 @@ void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
         return;
     }
 
+    // Validate buffer parameters.
+    const ShmAttributes* bufferAttributes = clientBuffer->shmAttributes();
+    auto bufferFormat = ScreencopyFrameV1Interface::BufferFormat{
+        drmFormatToShmFormat(bufferAttributes->format),
+        bufferAttributes->size,
+        bufferAttributes->stride,
+    };
+    if (bufferFormat != getBufferFormat()) {
+        qWarning() << "Buffer passed for screencopy has the wrong format; failing the request";
+        frame.sendFailed();
+        return;
+    }
+
     auto mapping = clientBuffer->map(GraphicsBuffer::Write);
     if (!mapping.data) {
         clientBuffer->unmap();
@@ -190,10 +223,9 @@ void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
         return;
     }
 
-    auto frameBox = clientBuffer->size();
-
     QImage frameImage{static_cast<uchar*>(mapping.data),
-                      frameBox.width(), frameBox.height(),
+                      bufferFormat.outputSize.width(),
+                      bufferFormat.outputSize.height(),
                       mapping.stride,
                       QImage::Format_ARGB32_Premultiplied};
 
@@ -301,14 +333,19 @@ void OutputTracking::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDa
 
 void OutputTracking::prepareFrame(ScreencopyFrameV1Interface* frame)
 {
-    // Send buffer format information
-    Output *output = frame->getOutput();
-    QSize outputSize = output->pixelSize();
-    uint32_t format = WL_SHM_FORMAT_ARGB8888;
-    uint32_t stride = outputSize.width() * 4; // 4 bytes per pixel for ARGB
-
-    frame->sendBuffer(format, outputSize.width(), outputSize.height(), stride);
+    frame->sendBuffer(getBufferFormat());
     frame->sendBufferDone();
+}
+
+ScreencopyFrameV1Interface::BufferFormat OutputTracking::getBufferFormat() const
+{
+    Q_ASSERT(m_output != nullptr);
+
+    uint32_t pixelFormat = WL_SHM_FORMAT_ARGB8888;
+    QSize outputSize = m_output->pixelSize();
+    int rowStride = outputSize.width() * 4;
+
+    return { pixelFormat, outputSize, rowStride };
 }
 
 class ScreencopySessionImpl : public ScreencopySession

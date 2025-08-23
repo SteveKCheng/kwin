@@ -182,6 +182,8 @@ public:
 
     void requestCopy(ScreencopyFrameV1Interface* frame, bool waitForDamage);
 
+    Output* getOutput() const { return m_output.get(); }
+
 private Q_SLOTS:
     //void handleOutputChange(const QRegion &damageLogical);
     //void handleCursorChanged(Cursor* cursor);
@@ -204,10 +206,25 @@ class ClientState : QObject
     Q_OBJECT
 
 private:
-    QHash<Output*, std::unique_ptr<OutputTracking>> allOutputs;
+    std::vector<std::unique_ptr<OutputTracking>> allOutputs;
 
 public:
-    OutputTracking& getOrCreateOutputTracking(Output* output);
+    OutputTracking& getOrCreateOutputTracking(Output* output)
+    {
+        auto iter = std::find_if(
+            allOutputs.begin(),
+            allOutputs.end(),
+            [output](std::unique_ptr<OutputTracking> & item) {
+                return item->getOutput() == output;
+            });
+
+        if (iter == allOutputs.end()) {
+            allOutputs.push_back(std::make_unique<OutputTracking>(output));
+            iter = allOutputs.end() - 1;
+        }
+
+        return *iter->get();
+    }
 };
 
 } // anonymous namespace

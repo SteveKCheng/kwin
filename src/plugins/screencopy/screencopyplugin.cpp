@@ -110,12 +110,13 @@ private:
      * This method also updates m_lastCursorBox as part of rendering the
      * cursor as part of the frame.
      */
-    void renderFrame(ScreencopyFrameV1Interface & frame);
+    void renderFrame(ScreencopyFrameV1Interface & frame, QRectF cursorRect);
 
     /**
-     * @brief Mark the buffer as ready, and update internal tracking variables.
+     * @brief Update internal tracking variables after an update has been
+     *        sent successfully.
      */
-    void finishFrame(ScreencopyFrameV1Interface & frame);
+    void finishUpdate(const QRect & cursorBox);
 
     /**
      * @brief Send to the client the contents of the damaged region.
@@ -193,7 +194,7 @@ uint32_t drmFormatToShmFormat(uint32_t drmFormat)
     }
 }
 
-void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
+void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame, QRectF cursorRect)
 {
     Output* output = m_output.get();
 
@@ -239,20 +240,23 @@ void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
 
     grabTexture(texture.get(), &frameImage);
 
-    if (frame.shouldOverlayCursor()) {
-        QRectF cursorRect = getCursorRect();
+    if (frame.shouldOverlayCursor() && cursorRect.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
-        if (cursorRect.isValid() && !cursorImage.isNull()) {
+        if (!cursorImage.isNull()) {
             QPainter painter(&frameImage);
             painter.drawImage(cursorRect, cursorImage);
-            m_lastCursorBox = cursorRect.toAlignedRect();
-        } else {
-            m_lastCursorBox = QRect();
         }
     }
 
     // Unmap the buffer
     clientBuffer->unmap();
+
+    // Send completion events - no Y_INVERT flag needed since grabTexture handles it
+    frame.sendFlags(0);
+
+    // Send timestamp using the output's presentation timestamp
+    auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
+    frame.sendReady(timestamp);
 }
 
 QRectF OutputTracking::getCursorRect() const
@@ -268,17 +272,11 @@ QRectF OutputTracking::getCursorRect() const
     return QRectF();
 }
 
-void OutputTracking::finishFrame(ScreencopyFrameV1Interface & frame)
+void OutputTracking::finishUpdate(const QRect &cursorBox)
 {
     m_accumulatedDamage.setRects(QSpan<QRect>());   // clear
     m_cursorHasChanged = false;
-
-    // Send completion events - no Y_INVERT flag needed since grabTexture handles it
-    frame.sendFlags(0);
-
-    // Send timestamp using the output's presentation timestamp
-    auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
-    frame.sendReady(timestamp);
+    m_lastCursorBox = cursorBox;
 }
 
 void OutputTracking::sendUpdatedContents()
@@ -293,8 +291,25 @@ void OutputTracking::sendUpdatedContents()
 
     m_pendingFrame = nullptr;
 
-    // Save old location of cursor
-    auto prevCursorBox = m_lastCursorBox;
+    auto cursorRect = getCursorRect();
+
+    if (m_lastCursorBox.isValid()) {
+        m_accumulatedDamage += m_lastCursorBox;
+    }
+
+    QRect newCursorBox;
+    if (cursorRect.isValid()) {
+        newCursorBox = cursorRect.toAlignedRect();
+        m_accumulatedDamage += newCursorBox;
+    }
+
+    // Send damage event(s).
+    if (m_accumulatedDamage.rectCount() <= 8) {
+        for (const QRect & rect : m_accumulatedDamage)
+            frame->sendDamage(rect);
+    } else {
+        frame->sendDamage(m_accumulatedDamage.boundingRect());
+    }
 
     // One would be tempted to think that copy_with_damage allows the server
     // to optimize out the copying of pixels that are not contained in the
@@ -309,28 +324,12 @@ void OutputTracking::sendUpdatedContents()
     // as "copy" except that it waits for "damage" occurring.
     //
     // So we must copy out the whole frame on every update despite the
-    // inefficiency: e.g. updating a single character in an interative
+    // inefficiency: e.g. updating a single character in an interactive
     // terminal turns into a ~8 MB CPU memory transfer, depending on the
     // size of the screen.
-    renderFrame(*frame);
+    renderFrame(*frame, cursorRect);
 
-    // Accumulate damage for the rendered cursor.
-    if (frame->shouldOverlayCursor()) {
-        if (prevCursorBox.isValid())
-            m_accumulatedDamage += prevCursorBox;
-        if (m_lastCursorBox.isValid())
-            m_accumulatedDamage += m_lastCursorBox;
-    }
-
-    // Send damage event(s).
-    if (m_accumulatedDamage.rectCount() <= 8) {
-        for (const QRect & rect : m_accumulatedDamage)
-            frame->sendDamage(rect);
-    } else {
-        frame->sendDamage(m_accumulatedDamage.boundingRect());
-    }
-
-    finishFrame(*frame);
+    finishUpdate(newCursorBox);
 }
 
 void OutputTracking::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage)
@@ -346,8 +345,9 @@ void OutputTracking::copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDa
         m_pendingFrame = frame;
         sendUpdatedContents();
     } else {
-        renderFrame(*frame);
-        finishFrame(*frame);
+        auto cursorRect = getCursorRect();
+        renderFrame(*frame, cursorRect);
+        finishUpdate(cursorRect.toAlignedRect());
     }
 }
 

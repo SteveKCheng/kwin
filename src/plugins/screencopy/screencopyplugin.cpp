@@ -75,11 +75,6 @@ private:
     const QPointer<Output> m_output;
 
     /**
-     * @brief Whether the cursor should be rendered as part of the frame.
-     */
-    const bool m_overlayCursor;
-
-    /**
      * @brief True if the cursor has been invalidated or has moved since the last
      *        "ready" event was fired.
      */
@@ -237,7 +232,6 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
                                          ScreencopyManagerImpl *parent)
     : ScreencopyFrameV1Interface(overlayCursor, frameBox, outputInterface, frameResource, parent)
     , m_output(outputInterface->handle())
-    , m_overlayCursor(overlayCursor)
 {
     // Send buffer format information
     Output *output = m_output.get();
@@ -283,7 +277,7 @@ void ScreencopyFrameImpl::trackOutput()
 
     connect(m_output.get(), &Output::outputChange, this, &ScreencopyFrameImpl::handleOutputChange);
 
-    if (m_overlayCursor) {
+    if (shouldOverlayCursor()) {
         auto* cursors = Cursors::self();
         connect(cursors, &Cursors::currentCursorChanged, this, &ScreencopyFrameImpl::handleCursorChanged);
         connect(cursors, &Cursors::hiddenChanged, this, &ScreencopyFrameImpl::handleCursorHidden);
@@ -376,7 +370,7 @@ void ScreencopyFrameImpl::sendUpdatedContents(bool immediate)
     renderToBuffer(*clientBuffer);
 
     // Accumulate damage for the rendered cursor.
-    if (m_overlayCursor) {
+    if (shouldOverlayCursor()) {
         if (prevCursorBox.isValid())
             m_accumulatedDamage += prevCursorBox;
         if (m_lastCursorBox.isValid())
@@ -422,7 +416,7 @@ void ScreencopyFrameImpl::renderToBuffer(ShmClientBuffer & clientBuffer)
 
     grabTexture(texture.get(), &frameImage);
 
-    if (m_overlayCursor) {
+    if (shouldOverlayCursor()) {
         const Cursor* cursor = Cursors::self()->currentCursor();
         const QImage cursorImage = kwinApp()->cursorImage().image();
         if (cursor != nullptr && !cursorImage.isNull()) {

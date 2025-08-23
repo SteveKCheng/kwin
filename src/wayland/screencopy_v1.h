@@ -24,6 +24,37 @@ class ScreencopyFrameV1Interface;
 class ShmClientBuffer;
 
 /**
+ * @brief Per-client session (state) object for ScreencopyManagerV1Interface.
+ */
+class KWIN_EXPORT ScreencopySession : public QObject
+{
+    Q_OBJECT
+
+public:
+    /**
+     * @brief Prepare to capture a frame's contents.
+     *
+     * This method should inform the client of the required buffer formats
+     * (through ScreencopyFrameV1Interface::sendBuffer and ScreencopyFrameV1Interface::sendBufferDone),
+     * and set up its own internal tracking of the display output.
+     *
+     * @param frame The frame that the Wayland client is asking to capture.
+     */
+    virtual void prepareFrame(ScreencopyFrameV1Interface* frame) = 0;
+
+    /**
+     * @brief Request for copying one frame from the client.
+     *
+     * @param frame The frame object created by the client that is the target of the framebuffer copy.
+     * @param waitForDamage If false, the Wayland client called \c copy and expects the framebuffer
+     *                      to be filled immediately.  If true, the Wayland called \c copy_with_damage
+     *                      and expects the framebuffer to be filled only when damage is seen on
+     *                      the output versus the preceding frame that was copied.
+     */
+    virtual void copyFrame(ScreencopyFrameV1Interface* frame, bool waitForDamage) = 0;
+};
+
+/**
  * The ScreencopyManagerV1Interface provides wlroots screencopy protocol support.
  * 
  * This allows clients to capture screen content directly to client-provided buffers,
@@ -51,40 +82,10 @@ protected:
      *
      * @return Newly instantiated per-client state object.
      */
-    virtual QObject *createClientState() = 0;
-
-    /**
-     * @brief Prepare to capture a frame's contents.
-     *
-     * This method should inform the client of the required buffer formats
-     * (through ScreencopyFrameV1Interface::sendBuffer and ScreencopyFrameV1Interface::sendBufferDone),
-     * and set up its own internal tracking of the display output.
-     *
-     * @param frame The frame that the Wayland client is asking to capture.
-     * @param clientState The per-client state object created via createClientState(),
-     *                    associated to the Wayland client requesting the frame capture.
-     */
-    virtual void prepareFrame(ScreencopyFrameV1Interface* frame,
-                              QObject *clientState) = 0;
-
-    /**
-     * @brief Request for copying one frame from the client.
-     *
-     * @param frame The frame object created by the client that is the target of the framebuffer copy.
-     * @param waitForDamage If false, the Wayland client called \c copy and expects the framebuffer
-     *                      to be filled immediately.  If true, the Wayland called \c copy_with_damage
-     *                      and expects the framebuffer to be filled only when damage is seen on
-     *                      the output versus the preceding frame that was copied.
-     * @param clientState The per-client state object created via createClientState(),
-     *                    associated to the Wayland client requesting the copy.
-     */
-    virtual void copyFrame(ScreencopyFrameV1Interface* frame,
-                           bool waitForDamage,
-                           QObject* clientState) = 0;
+    virtual ScreencopySession *createSession() = 0;
 
 private:
     friend class ScreencopyManagerV1InterfacePrivate;
-    friend class ScreencopyFrameV1InterfacePrivate; // for calling copyFrame
     const std::unique_ptr<ScreencopyManagerV1InterfacePrivate> d;
 };
 
@@ -164,7 +165,7 @@ public:
 
 private:
     explicit ScreencopyFrameV1Interface(ScreencopyManagerV1Interface *manager,
-                                        QObject* clientState);
+                                        ScreencopySession* session);
 
     friend class ScreencopyFrameV1InterfacePrivate;
     friend class ScreencopyManagerV1InterfacePrivate; // for construction

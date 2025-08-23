@@ -34,24 +34,24 @@ private:
     ScreencopyManagerV1Interface* const m_parent;
     
     // Map from wl_client to per-client state objects
-    QHash<wl_client *, QObject *> m_clientStates;
+    QHash<wl_client *, ScreencopySession *> m_clientSessions;
 
-    void createClientState(wl_client *client)
+    void createClientSession(wl_client *client)
     {
-        Q_ASSERT(!m_clientStates.contains(client)); // Should not already exist
+        Q_ASSERT(!m_clientSessions.contains(client)); // Should not already exist
         
         // Create new client state via factory
-        QObject *clientState = m_parent->createClientState();
-        if (clientState != nullptr) {
-            m_clientStates[client] = clientState;
+        auto *clientSession = m_parent->createSession();
+        if (clientSession != nullptr) {
+            m_clientSessions[client] = clientSession;
         }
     }
 
-    QObject *getClientState(wl_client *client)
+    ScreencopySession *getClientSession(wl_client *client)
     {
-        QObject *clientState = m_clientStates.value(client);
-        Q_ASSERT(clientState != nullptr); // Should have been created in bind_resource
-        return clientState;
+        auto *clientSession = m_clientSessions.value(client);
+        Q_ASSERT(clientSession != nullptr); // Should have been created in bind_resource
+        return clientSession;
     }
 
 
@@ -60,8 +60,8 @@ protected:
     {
         // Create per-client state when client first binds to manager
         wl_client *client = resource->client();
-        if (!m_clientStates.contains(client)) {
-            createClientState(client);
+        if (!m_clientSessions.contains(client)) {
+            createClientSession(client);
         }
     }
 
@@ -70,7 +70,7 @@ protected:
         // Clean up per-client state if this was the last resource for this client
         wl_client *client = resource->client();
         if (!resourceMap().contains(client)) {
-            delete m_clientStates.take(client);
+            delete m_clientSessions.take(client);
         }
     }
 
@@ -98,11 +98,9 @@ class ScreencopyFrameV1InterfacePrivate final : public QtWaylandServer::zwlr_scr
 {
 public:
     ScreencopyFrameV1InterfacePrivate(ScreencopyFrameV1Interface *q,
-                                      ScreencopyManagerV1Interface* manager,
-                                      QObject* clientState)
+                                      ScreencopySession* session)
         : m_parent(q)
-        , m_manager(manager)
-        , m_clientState(clientState)
+        , m_session(session)
     {
     }
 
@@ -115,18 +113,18 @@ public:
 private:
     /**
      * @brief Pointer to the owner of this private pimpl, required for deletion
-     *        and for passing to ScreencopyManagerV1Interface::copyFrame.
+     *        and for passing to ScreencopySession.
      */
     ScreencopyFrameV1Interface * const m_parent;
 
     /**
-     * @brief Pointer to owning manager, for calling ScreencopyManagerV1Interface::copyFrame.
+     * @brief Pointer to client session, for invoking the implementation in response
+     *        to client requests.
      *
-     * This manager is the QObject parent of m_parent so it is guaranteed to be alive if this object is.
+     * This is owned by the ScreencopyManagerV1Interface, which is the QObject parent of m_parent,
+     * so it is guaranteed to be alive if this object is.
      */
-    ScreencopyManagerV1Interface * const m_manager;
-
-    QObject* const m_clientState;
+    ScreencopySession * const m_session;
 
     /**
      * @brief Common code to handle client's request for \c copy and \c copy_with_damage.
@@ -174,15 +172,15 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    QObject *clientState = getClientState(resource->client());
+    ScreencopySession *session = getClientSession(resource->client());
 
-    auto* frame = new ScreencopyFrameV1Interface(m_parent, clientState);
+    auto* frame = new ScreencopyFrameV1Interface(m_parent, session);
     frame->d->m_output = outputInterface->handle();
     frame->d->m_frameBox = QRect();
     frame->d->m_overlayCursor = (overlay_cursor != 0);
     frame->d->init(frameResource);
 
-    m_parent->prepareFrame(frame, clientState);
+    session->prepareFrame(frame);
 }
 
 void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,
@@ -228,7 +226,7 @@ void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool 
     }
 
     m_shmClientBuffer = shmClientBuffer;
-    m_manager->copyFrame(m_parent, withDamage, m_clientState);
+    m_session->copyFrame(m_parent, withDamage);
 }
 
 //
@@ -248,9 +246,9 @@ ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 //
 
 ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(ScreencopyManagerV1Interface *manager,
-                                                       QObject* clientState)
+                                                       ScreencopySession *session)
     : QObject(manager)
-    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, manager, clientState))
+    , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, session))
 {
 }
 

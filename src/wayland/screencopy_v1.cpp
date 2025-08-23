@@ -32,26 +32,48 @@ public:
 
 private:
     ScreencopyManagerV1Interface* const m_parent;
+    
+    // Map from wl_client to per-client state objects
+    QHash<wl_client *, QObject *> m_clientStates;
 
-    QObject *getOrCreateClientState(wl_resource *manager_resource)
+    void createClientState(wl_client *client)
     {
-        QObject *clientState = static_cast<QObject *>(wl_resource_get_user_data(manager_resource));
-        if (clientState == nullptr) {
-            // Create new client state via factory
-            clientState = m_parent->createClientState();
-            if (clientState != nullptr) {
-                // Attach state to manager resource with automatic cleanup
-                wl_resource_set_user_data(manager_resource, clientState);
-                wl_resource_set_destructor(manager_resource, [](wl_resource *resource) {
-                    QObject *clientState = static_cast<QObject *>(wl_resource_get_user_data(resource));
-                    delete clientState;
-                });
-            }
+        Q_ASSERT(!m_clientStates.contains(client)); // Should not already exist
+        
+        // Create new client state via factory
+        QObject *clientState = m_parent->createClientState();
+        if (clientState != nullptr) {
+            m_clientStates[client] = clientState;
         }
+    }
+
+    QObject *getClientState(wl_client *client)
+    {
+        QObject *clientState = m_clientStates.value(client);
+        Q_ASSERT(clientState != nullptr); // Should have been created in bind_resource
         return clientState;
     }
 
+
 protected:
+    void zwlr_screencopy_manager_v1_bind_resource(Resource *resource) override
+    {
+        // Create per-client state when client first binds to manager
+        wl_client *client = resource->client();
+        if (!m_clientStates.contains(client)) {
+            createClientState(client);
+        }
+    }
+
+    void zwlr_screencopy_manager_v1_destroy_resource(Resource *resource) override
+    {
+        // Clean up per-client state if this was the last resource for this client
+        wl_client *client = resource->client();
+        if (!resourceMap().contains(client)) {
+            delete m_clientStates.take(client);
+        }
+    }
+
     void zwlr_screencopy_manager_v1_capture_output(Resource *resource,
                                                    uint32_t frame,
                                                    int32_t overlay_cursor,
@@ -147,7 +169,7 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    QObject *clientState = getOrCreateClientState(resource->handle);
+    QObject *clientState = getClientState(resource->client());
 
     m_parent->createFrame(overlay_cursor != 0,
                           QRect(),

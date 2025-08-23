@@ -235,7 +235,7 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
                                          wl_resource *frameResource,
                                          OutputInterface *outputInterface,
                                          ScreencopyManagerImpl *parent)
-    : ScreencopyFrameV1Interface(frameResource, parent)
+    : ScreencopyFrameV1Interface(overlayCursor, frameBox, outputInterface, frameResource, parent)
     , m_output(outputInterface->handle())
     , m_overlayCursor(overlayCursor)
 {

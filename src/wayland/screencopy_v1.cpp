@@ -7,8 +7,10 @@
 #include "screencopy_v1.h"
 #include "display.h"
 #include "output.h"
-#include "core/output.h"
+#include "wayland/output.h"
 #include "wayland/shmclientbuffer_p.h"
+
+#include <QPointer>
 
 #include <chrono>
 
@@ -77,6 +79,10 @@ public:
         : m_parent(q)
     {
     }
+
+    QPointer<Output> m_output;
+    QRect m_frameBox;
+    bool m_overlayCursor = false;
 
 private:
     ScreencopyFrameV1Interface* const m_parent;
@@ -186,15 +192,36 @@ ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 // Implementation of ScreencopyFrameV1Interface
 //
 
-ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(wl_resource* frameResource,
+ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(bool overlayCursor,
+                                                       const QRect & frameBox,
+                                                       OutputInterface* outputInterface,
+                                                       wl_resource* frameResource,
                                                        ScreencopyManagerV1Interface *parent)
     : QObject(parent)
     , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this))
 {
+    d->m_output = outputInterface->handle();
+    d->m_frameBox = frameBox;
+    d->m_overlayCursor = overlayCursor;
     d->init(frameResource);
 }
 
 ScreencopyFrameV1Interface::~ScreencopyFrameV1Interface() = default;
+
+Output* ScreencopyFrameV1Interface::getOutput() const
+{
+    return d->m_output.get();
+}
+
+const QRect & ScreencopyFrameV1Interface::getCapturedArea() const
+{
+    return d->m_frameBox;
+}
+
+bool ScreencopyFrameV1Interface::shouldOverlayCursor() const
+{
+    return d->m_overlayCursor;
+}
 
 void ScreencopyFrameV1Interface::sendBuffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride)
 {

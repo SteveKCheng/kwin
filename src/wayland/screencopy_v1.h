@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "core/output.h"
 #include "kwin_export.h"
 
 #include <QObject>
@@ -94,8 +95,26 @@ class KWIN_EXPORT ScreencopyFrameV1Interface : public QObject
 public:
     ~ScreencopyFrameV1Interface() override;
 
-protected:
-    explicit ScreencopyFrameV1Interface(wl_resource* frameResource,
+    /**
+     * @brief The target display output to capture.
+     */
+    Output * getOutput() const;
+
+    /**
+     *
+     * @brief Get the area of the output that the client requested to capture.
+     */
+    const QRect & getCapturedArea() const;
+
+    /**
+     * @brief Whether the client requested the cursor be overlaid (rendered) onto the frame.
+     */
+    bool shouldOverlayCursor() const;
+
+    explicit ScreencopyFrameV1Interface(bool overlayCursor,
+                                        const QRect & frameBox,
+                                        OutputInterface* outputInterface,
+                                        wl_resource* frameResource,
                                         ScreencopyManagerV1Interface *parent);
 
     /**

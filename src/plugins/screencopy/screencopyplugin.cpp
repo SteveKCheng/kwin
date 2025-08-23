@@ -131,6 +131,14 @@ private:
      * This method is factored out for validating the client's buffer's parameters.
      */
     ScreencopyFrameV1Interface::BufferFormat getBufferFormat() const;
+
+    /**
+     * @brief Get the rectangular area where the (mouse) cursor is to be painted on the framebuffer.
+     *
+     * If there is no cursor to paint (including the case that it is hidden),
+     * this method returns the null rectangle.
+     */
+    QRectF getCursorRect() const;
 };
 
 OutputTracking::OutputTracking(Output* output)
@@ -232,10 +240,9 @@ void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
     grabTexture(texture.get(), &frameImage);
 
     if (frame.shouldOverlayCursor()) {
-        const Cursor* cursor = Cursors::self()->currentCursor();
+        QRectF cursorRect = getCursorRect();
         const QImage cursorImage = kwinApp()->cursorImage().image();
-        if (cursor != nullptr && !cursorImage.isNull()) {
-            const QRectF cursorRect = scaledRect(cursor->geometry(), output->scale());
+        if (cursorRect.isValid() && !cursorImage.isNull()) {
             QPainter painter(&frameImage);
             painter.drawImage(cursorRect, cursorImage);
             m_lastCursorBox = cursorRect.toAlignedRect();
@@ -246,6 +253,19 @@ void OutputTracking::renderFrame(ScreencopyFrameV1Interface & frame)
 
     // Unmap the buffer
     clientBuffer->unmap();
+}
+
+QRectF OutputTracking::getCursorRect() const
+{
+    Q_ASSERT(m_output != nullptr);
+
+    const auto* cursors = Cursors::self();
+    const Cursor* cursor = cursors->currentCursor();
+    if (!cursors->isCursorHidden() && cursor != nullptr) {
+        return scaledRect(cursor->geometry(), m_output->scale());
+    }
+
+    return QRectF();
 }
 
 void OutputTracking::finishFrame(ScreencopyFrameV1Interface & frame)

@@ -54,6 +54,14 @@ private:
         return clientSession;
     }
 
+    /**
+     * @brief Common code to handle client's request for \c capture_output and \c capture_output_region.
+     */
+    void captureRequested(Resource *resource,
+                          uint32_t frameId,
+                          bool overlayCursor,
+                          struct ::wl_resource *output,
+                          const QRect & frameBox);
 
 protected:
     void zwlr_screencopy_manager_v1_bind_resource(Resource *resource) override
@@ -74,10 +82,18 @@ protected:
         }
     }
 
+    void zwlr_screencopy_manager_v1_destroy(Resource *resource) override
+    {
+        wl_resource_destroy(resource->handle);
+    }
+
     void zwlr_screencopy_manager_v1_capture_output(Resource *resource,
                                                    uint32_t frame,
                                                    int32_t overlay_cursor,
-                                                   struct ::wl_resource *output) override;
+                                                   struct ::wl_resource *output) override
+    {
+        captureRequested(resource, frame, overlay_cursor != 0, output, QRect());
+    }
 
     void zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,
                                                           uint32_t frame,
@@ -86,11 +102,15 @@ protected:
                                                           int32_t x,
                                                           int32_t y,
                                                           int32_t width,
-                                                          int32_t height) override;
-
-    void zwlr_screencopy_manager_v1_destroy(Resource *resource) override
+                                                          int32_t height) override
     {
-        wl_resource_destroy(resource->handle);
+        QRect frameBox(x, y, width, height);
+        if (!frameBox.isValid()) {
+            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_METHOD, "invalid area to capture");
+            return;
+        }
+
+        captureRequested(resource, frame, overlay_cursor != 0, output, frameBox);
     }
 };
 
@@ -154,10 +174,11 @@ protected:
     }
 };
 
-void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output(Resource *resource,
-                                                                                    uint32_t frame_id,
-                                                                                    int32_t overlay_cursor,
-                                                                                    wl_resource *output_resource)
+void ScreencopyManagerV1InterfacePrivate::captureRequested(Resource *resource,
+                                                           uint32_t frameId,
+                                                           bool overlayCursor,
+                                                           wl_resource *output_resource,
+                                                           const QRect &frameBox)
 {
     // Get the OutputInterface from the wl_resource
     OutputInterface *outputInterface = OutputInterface::get(output_resource);
@@ -166,7 +187,7 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
         return;
     }
 
-    wl_resource *frameResource = wl_resource_create(resource->client(), &zwlr_screencopy_frame_v1_interface, resource->version(), frame_id);
+    wl_resource *frameResource = wl_resource_create(resource->client(), &zwlr_screencopy_frame_v1_interface, resource->version(), frameId);
     if (!frameResource) {
         wl_resource_post_no_memory(resource->handle);
         return;
@@ -176,38 +197,11 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
 
     auto* frame = new ScreencopyFrameV1Interface(m_parent, session);
     frame->d->m_output = outputInterface->handle();
-    frame->d->m_frameBox = QRect();
-    frame->d->m_overlayCursor = (overlay_cursor != 0);
+    frame->d->m_frameBox = frameBox;
+    frame->d->m_overlayCursor = overlayCursor;
     frame->d->init(frameResource);
 
     session->prepareFrame(frame);
-}
-
-void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_output_region(Resource *resource,
-                                                                                           uint32_t frame,
-                                                                                           int32_t overlay_cursor,
-                                                                                           wl_resource *output_resource,
-                                                                                           int32_t x,
-                                                                                           int32_t y,
-                                                                                           int32_t width,
-                                                                                           int32_t height)
-{
-    /*
-    // TODO: Implement region capture
-    // For now, just create a frame resource and immediately fail it
-    wl_resource *frameResource = wl_resource_create(resource->client(), &zwlr_screencopy_frame_v1_interface, resource->version(), frame);
-    if (!frameResource) {
-        wl_resource_post_no_memory(resource->handle);
-        return;
-    }
-
-    auto frameInterface = new ScreencopyFrameV1Interface(nullptr, QRect(x, y, width, height), overlay_cursor, m_parent);
-    auto framePrivate = new ScreencopyFrameV1InterfacePrivate(frameInterface);
-    framePrivate->init(frameResource);
-
-    // Send failed event for now
-    framePrivate->send_failed();
-    */
 }
 
 void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool withDamage)

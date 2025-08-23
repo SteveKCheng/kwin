@@ -107,8 +107,10 @@ public:
     Output * getOutput() const;
 
     /**
-     *
      * @brief Get the rectangular area of the output that the client requested to capture.
+     *
+     * This is the null rectangle if the client asked to capture the whole output (without specifying
+     * any coordinates).
      */
     const QRect & getCapturedArea() const;
 

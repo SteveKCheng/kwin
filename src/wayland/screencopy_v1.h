@@ -163,12 +163,8 @@ public:
     void sendFailed();
 
 private:
-    explicit ScreencopyFrameV1Interface(bool overlayCursor,
-                                        const QRect & frameBox,
-                                        OutputInterface* outputInterface,
-                                        wl_resource* frameResource,
-                                        QObject* clientState,
-                                        ScreencopyManagerV1Interface *manager);
+    explicit ScreencopyFrameV1Interface(ScreencopyManagerV1Interface *manager,
+                                        QObject* clientState);
 
     friend class ScreencopyFrameV1InterfacePrivate;
     friend class ScreencopyManagerV1InterfacePrivate; // for construction

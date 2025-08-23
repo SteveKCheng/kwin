@@ -176,12 +176,11 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
 
     QObject *clientState = getClientState(resource->client());
 
-    auto* frame = new ScreencopyFrameV1Interface(overlay_cursor != 0,
-                                                 QRect(),
-                                                 outputInterface,
-                                                 frameResource,
-                                                 clientState,
-                                                 m_parent);
+    auto* frame = new ScreencopyFrameV1Interface(m_parent, clientState);
+    frame->d->m_output = outputInterface->handle();
+    frame->d->m_frameBox = QRect();
+    frame->d->m_overlayCursor = (overlay_cursor != 0);
+    frame->d->init(frameResource);
 
     m_parent->prepareFrame(frame, clientState);
 }
@@ -248,19 +247,11 @@ ScreencopyManagerV1Interface::~ScreencopyManagerV1Interface() = default;
 // Implementation of ScreencopyFrameV1Interface
 //
 
-ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(bool overlayCursor,
-                                                       const QRect & frameBox,
-                                                       OutputInterface* outputInterface,
-                                                       wl_resource* frameResource,
-                                                       QObject* clientState,
-                                                       ScreencopyManagerV1Interface *manager)
+ScreencopyFrameV1Interface::ScreencopyFrameV1Interface(ScreencopyManagerV1Interface *manager,
+                                                       QObject* clientState)
     : QObject(manager)
     , d(std::make_unique<ScreencopyFrameV1InterfacePrivate>(this, manager, clientState))
 {
-    d->m_output = outputInterface->handle();
-    d->m_frameBox = frameBox;
-    d->m_overlayCursor = overlayCursor;
-    d->init(frameResource);
 }
 
 ScreencopyFrameV1Interface::~ScreencopyFrameV1Interface() = default;

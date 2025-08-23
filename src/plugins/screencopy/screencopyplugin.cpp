@@ -171,7 +171,7 @@ private:
     bool m_delayedUpdateScheduled = false;
 
 protected:
-    void copyRequested(ShmClientBuffer *clientBuffer, bool waitForDamage) override;
+    void copyRequested(bool waitForDamage) override;
 };
 
 namespace
@@ -251,7 +251,7 @@ ScreencopyFrameImpl::ScreencopyFrameImpl(bool overlayCursor,
     trackOutput();
 }
 
-void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool waitForDamage)
+void ScreencopyFrameImpl::copyRequested(bool waitForDamage)
 {
     // Fail if output has already gone away.
     if (!m_output) {
@@ -268,10 +268,10 @@ void ScreencopyFrameImpl::copyRequested(ShmClientBuffer * clientBuffer, bool wai
     }
 
     if (waitForDamage) {
-        m_capturedShmBuffer = clientBuffer;
+        m_capturedShmBuffer = takeShmClientBuffer();
         sendUpdatedContents(true);
     } else {
-        renderToBuffer(*clientBuffer);
+        renderToBuffer(*takeShmClientBuffer());
         finishUpdate();
     }
 }

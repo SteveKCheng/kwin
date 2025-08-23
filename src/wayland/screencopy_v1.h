@@ -111,6 +111,20 @@ public:
      */
     bool shouldOverlayCursor() const;
 
+    /**
+     * @brief Take the shared-memory buffer from the client to copy the frame's contents
+     *        into.
+     *
+     * A pointer to the buffer passed in from the Wayland client, calling \c copy or \c copy_with_damage,
+     * is captured by this object.  A buffer should only be used once per frame, so the pointer
+     * to that buffer is erased from this object once this method is called.
+     *
+     * The client buffer is guaranteed to be alive until control returns to the Wayland dispatch loop.
+     *
+     * This method returns null if there is no registered buffer or the client destroyed it.
+     */
+    ShmClientBuffer* takeShmClientBuffer();
+
     explicit ScreencopyFrameV1Interface(bool overlayCursor,
                                         const QRect & frameBox,
                                         OutputInterface* outputInterface,
@@ -149,7 +163,7 @@ public:
      */
     void sendFailed();
 
-    virtual void copyRequested(ShmClientBuffer* clientBuffer, bool waitForDamage) = 0;
+    virtual void copyRequested(bool waitForDamage) = 0;
 
 private:
     friend class ScreencopyFrameV1InterfacePrivate;

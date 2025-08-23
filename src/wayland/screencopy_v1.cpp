@@ -84,6 +84,8 @@ public:
     QRect m_frameBox;
     bool m_overlayCursor = false;
 
+    QPointer<ShmClientBuffer> m_shmClientBuffer;
+
 private:
     ScreencopyFrameV1Interface* const m_parent;
     void copyRequested(struct ::wl_resource *buffer, bool withDamage);
@@ -167,13 +169,21 @@ void ScreencopyManagerV1InterfacePrivate::zwlr_screencopy_manager_v1_capture_out
 
 void ScreencopyFrameV1InterfacePrivate::copyRequested(wl_resource *buffer, bool withDamage)
 {
-    auto* shmBuffer = ShmClientBuffer::get(buffer);
-    if (!shmBuffer) {
+    if (m_shmClientBuffer != nullptr) {
+        // zwlr_screencopy_frame_v1::error::already_used
+        qWarning() << "screencopy's copy or copy_with_damage method called by the Wayland client while another copy is pending";
         send_failed();
         return;
     }
 
-    m_parent->copyRequested(shmBuffer, withDamage);
+    auto* shmClientBuffer = ShmClientBuffer::get(buffer);
+    if (!shmClientBuffer) {
+        send_failed();
+        return;
+    }
+
+    m_shmClientBuffer = shmClientBuffer;
+    m_parent->copyRequested(withDamage);
 }
 
 //
@@ -221,6 +231,13 @@ const QRect & ScreencopyFrameV1Interface::getCapturedArea() const
 bool ScreencopyFrameV1Interface::shouldOverlayCursor() const
 {
     return d->m_overlayCursor;
+}
+
+ShmClientBuffer* ScreencopyFrameV1Interface::takeShmClientBuffer()
+{
+    auto* p = d->m_shmClientBuffer.get();
+    d->m_shmClientBuffer = nullptr;
+    return p;
 }
 
 void ScreencopyFrameV1Interface::sendBuffer(uint32_t format, uint32_t width, uint32_t height, uint32_t stride)

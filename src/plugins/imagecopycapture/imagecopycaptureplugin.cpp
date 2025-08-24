@@ -37,9 +37,11 @@ class ImageCopyCaptureSessionImpl : public ImageCopyCaptureSessionV1Interface
     Q_OBJECT
 
 public:
-    ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor);
+    ImageCopyCaptureSessionImpl(wl_resource* resource,
+                                ImageCopyCaptureManagerV1Interface *manager,
+                                Output *output,
+                                bool overlayCursor);
 
-    void advertiseBufferConstraints() override;
     void captureFrame(ImageCopyCaptureFrameV1Interface* frame) override;
 
 private Q_SLOTS:
@@ -93,6 +95,8 @@ private:
 
     QPointer<ImageCopyCaptureFrameV1Interface> m_pendingFrame;
 
+    void advertiseBufferConstraints();
+
     /**
      * @brief Render the contents of the output into the frame's buffer.
      *
@@ -123,8 +127,11 @@ private:
     QRectF getCursorRect() const;
 };
 
-ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor)
-    : ImageCopyCaptureSessionV1Interface(manager)
+ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
+                                                         ImageCopyCaptureManagerV1Interface *manager,
+                                                         Output *output,
+                                                         bool overlayCursor)
+    : ImageCopyCaptureSessionV1Interface(resource, manager)
     , m_output(output)
     , m_overlayCursor(overlayCursor)
 {
@@ -138,6 +145,8 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(ImageCopyCaptureManager
     }
 
     m_accumulatedDamage += QRect(QPoint(0,0), output->pixelSize());
+
+    advertiseBufferConstraints();
 }
 
 void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
@@ -325,9 +334,11 @@ public:
     }
 
 protected:
-    ImageCopyCaptureSessionV1Interface* createSession(Output *output, bool overlayCursor) override
+    ImageCopyCaptureSessionV1Interface* createSession(wl_resource* resource,
+                                                      Output *output,
+                                                      bool overlayCursor) override
     {
-        return new ImageCopyCaptureSessionImpl(this, output, overlayCursor);
+        return new ImageCopyCaptureSessionImpl(resource, this, output, overlayCursor);
     }
 };
 

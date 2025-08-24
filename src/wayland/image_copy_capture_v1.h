@@ -48,14 +48,26 @@ protected:
      * @brief Instantiate a capture session for the given output with specified options.
      *
      * This factory method is called when a client requests to create a session.
+     *
      * The returned session object will be automatically deleted when the 
      * session is destroyed by the client.
      *
+     * After creating the session object, this method should use that object to
+     * advertise to the client the required buffer constraints
+     * through the methods such as ImageCopyCaptureSessionV1Interface::sendBufferSize
+     * and ImageCopyCaptureSessionV1Interface::sendShmFormat.
+     *
+     * @param resource The Wayland resource behind the implementation.
+     *                 Should be passed to the constructor of
+     *                 ImageCopyCaptureSessionV1Interface.
      * @param output The output to capture from
      * @param overlayCursor Whether to overlay cursor onto captured frames
+     *
      * @return Newly instantiated session object or nullptr on failure
      */
-    virtual ImageCopyCaptureSessionV1Interface *createSession(Output *output, bool overlayCursor) = 0;
+    virtual ImageCopyCaptureSessionV1Interface *createSession(wl_resource* resource,
+                                                              Output *output,
+                                                              bool overlayCursor) = 0;
 
 private:
     friend class ImageCopyCaptureManagerV1InterfacePrivate;
@@ -73,20 +85,8 @@ public:
     ~ImageCopyCaptureSessionV1Interface() override;
 
 protected:
-    explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
-
-    /**
-     * @brief Tell the client what buffer formats this capture session are compatible with.
-     *
-     * This method should inform the client of the required buffer constraints
-     * through the methods #sendBufferSize, #sendShmFormat, etc.
-     *
-     * This method is called once on creating the session (on what is returned by
-     * ImageCopyCaptureManagerV1Interface::createSession), but the session may autonomously
-     * re-advertise the buffer constraints if they change, in accordance with the
-     * protocol specification.
-     */
-    virtual void advertiseBufferConstraints() = 0;
+    explicit ImageCopyCaptureSessionV1Interface(wl_resource* resource,
+                                                ImageCopyCaptureManagerV1Interface *manager);
 
     /**
      * @brief Request for capturing one frame from the client.

@@ -65,6 +65,7 @@ public:
     }
 
     QPointer<ImageCopyCaptureFrameV1Interface> m_currentFrame;
+    bool m_ownsResource = false;
 
 private:
     /**
@@ -80,7 +81,10 @@ protected:
 
     void ext_image_copy_capture_session_v1_destroy(Resource *resource) override
     {
-        wl_resource_destroy(resource->handle);
+        if (m_ownsResource) {
+            wl_resource_destroy(resource->handle);
+            m_ownsResource = false;
+        }
     }
 
     void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override;
@@ -212,16 +216,14 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
 
     bool overlayCursor = (options & QtWaylandServer::ext_image_copy_capture_manager_v1::options_paint_cursors) != 0;
 
-    auto *session = m_parent->createSession(output, overlayCursor);
+    auto *session = m_parent->createSession(sessionResource, output, overlayCursor);
     if (!session) {
         wl_resource_destroy(sessionResource);
         return;
     }
 
-    session->d->init(sessionResource);
-
-    // Send initial buffer constraints
-    session->advertiseBufferConstraints();
+    // Pass ownership of sessionResource to new object only after all initialization is successful
+    session->d->m_ownsResource = true;
 }
 
 ImageCopyCaptureManagerV1Interface::ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent)
@@ -254,10 +256,12 @@ void ImageCopyCaptureSessionV1InterfacePrivate::ext_image_copy_capture_session_v
     m_currentFrame = frame;
 }
 
-ImageCopyCaptureSessionV1Interface::ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager)
+ImageCopyCaptureSessionV1Interface::ImageCopyCaptureSessionV1Interface(wl_resource* resource,
+                                                                       ImageCopyCaptureManagerV1Interface *manager)
     : QObject(manager)
     , d(std::make_unique<ImageCopyCaptureSessionV1InterfacePrivate>(this))
 {
+    d->init(resource);
 }
 
 ImageCopyCaptureSessionV1Interface::~ImageCopyCaptureSessionV1Interface() = default;

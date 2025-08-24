@@ -72,6 +72,9 @@ class KWIN_EXPORT ImageCopyCaptureSessionV1Interface : public QObject
 public:
     ~ImageCopyCaptureSessionV1Interface() override;
 
+protected:
+    explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
+
     /**
      * @brief Tell the client what buffer formats this capture session are compatible with.
      *
@@ -122,14 +125,11 @@ public:
      */
     void sendStopped();
 
-public:
-    explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
-
+private:
     friend class ImageCopyCaptureSessionV1InterfacePrivate;
-    friend class ImageCopyCaptureManagerV1InterfacePrivate; // for construction
-    friend class ImageCopyCaptureFrameV1InterfacePrivate; // for frame access
+    friend class ImageCopyCaptureManagerV1InterfacePrivate; // for advertiseBufferConstraints
+    friend class ImageCopyCaptureFrameV1InterfacePrivate; // for captureFrame
 
-public: // Make d accessible for private implementations
     const std::unique_ptr<ImageCopyCaptureSessionV1InterfacePrivate> d;
 };
 
@@ -187,16 +187,14 @@ public:
         stopped = 2,
     };
 
-
     /**
      * Send failed event to indicate capture failure.
      */
     void sendFailed(FailureReason reason);
 
-public:
+private:
     explicit ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session);
 
-    friend class ImageCopyCaptureFrameV1InterfacePrivate;
     friend class ImageCopyCaptureSessionV1InterfacePrivate; // for construction
     const std::unique_ptr<ImageCopyCaptureFrameV1InterfacePrivate> d;
 };

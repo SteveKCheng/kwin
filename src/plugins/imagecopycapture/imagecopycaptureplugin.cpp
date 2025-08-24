@@ -70,7 +70,7 @@ private:
      * @brief True if the cursor has been invalidated or has moved since the last
      *        "ready" event was fired.
      */
-    bool m_cursorHasChanged = false;
+    bool m_cursorHasChanged;
 
     /**
      * @brief The region of the Output that has changed since the last "ready" event
@@ -84,15 +84,22 @@ private:
      * first capture request to be satisfied immediately, and the frame
      * sent out will contain everything.
      */
-    QRegion m_accumulatedDamage;
+    QRegion m_frameDamage;
 
     /**
      * @brief The position and extents of the cursor when
      *        it was rendered last and sent to the client.
      *
      * This region is expressed in physical (scaled) coordinates.
+     *
+     * This information is separated out from m_frameDamage for:
+     *
+     *   - reporting the old location of the cursor to erase (as damage)
+     *     on the next frame
+     *   - remembering the old location of the cursor if it has not been
+     *     invalidated to re-paint again, while not damaging it unnecessarily
      */
-    QRect m_lastCursorBox;
+    QRectF m_lastCursorBox;
 
     /**
      * @brief Send events to advertise the supported buffer formats to the client.
@@ -106,21 +113,24 @@ private:
      *
      * This method marks the frame as "ready" after rendering into the buffer.
      * So, all "damage" events must be sent out for the frame before calling this method.
+     *
+     * Called as part of #sendCapturedFrame.
      */
     void renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect);
 
     /**
-     * @brief Update internal tracking variables after an update has been
+     * @brief Update internal tracking variables after a frame update has been
      *        sent successfully.
      */
-    void finishUpdate(const QRect & cursorBox);
+    void updateTracking(const QRectF & cursorBox);
 
     /**
-     * @brief Send to the client the contents of the damaged region.
+     * @brief Send to the client the contents of the current output, if there
+     *        is a frame being captured.
      *
-     * The damaged region will be cleared afterwards.
+     * This method will call #updateTracking afterwards.
      */
-    void sendUpdatedContents();
+    void sendFrameUpdatesIfAny();
 
     /**
      * @brief Get the rectangular area where the (mouse) cursor is to be painted on the framebuffer.
@@ -128,7 +138,7 @@ private:
      * If there is no cursor to paint (including the case that it is hidden),
      * this method returns the null rectangle.
      */
-    QRectF getCursorRect() const;
+    QRectF getCursorBox() const;
 };
 
 ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
@@ -139,6 +149,10 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
     , m_output(output)
     , m_overlayCursor(overlayCursor)
 {
+    // All output contents are damaged at start
+    m_frameDamage += QRect(QPoint(0,0), output->pixelSize());
+    m_cursorHasChanged = true;
+
     connect(output, &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputChange);
 
     if (overlayCursor) {
@@ -148,35 +162,33 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
         connect(cursors, &Cursors::positionChanged, this, &ImageCopyCaptureSessionImpl::handleCursorMoved);
     }
 
-    m_accumulatedDamage += QRect(QPoint(0,0), output->pixelSize());
-
     advertiseBufferConstraints();
 }
 
 void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
 {
     auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
-    m_accumulatedDamage |= damagePhysical;
+    m_frameDamage |= damagePhysical;
 
-    sendUpdatedContents();
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::handleCursorChanged(Cursor* cursor)
 {
     m_cursorHasChanged = true;
-    sendUpdatedContents();
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::handleCursorHidden()
 {
     m_cursorHasChanged = true;
-    sendUpdatedContents();
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPointF &position)
 {
     m_cursorHasChanged = true;
-    sendUpdatedContents();
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect)
@@ -225,6 +237,7 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
 
     grabTexture(texture.get(), &frameImage);
 
+    // Paint cursor (if requested)
     if (cursorRect.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
         if (!cursorImage.isNull()) {
@@ -233,23 +246,24 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
         }
     }
 
-    // Unmap the buffer
+    // Finish this frame
     clientBuffer->unmap();
 
-    // Send metadata events
     frame.sendTransform(WL_OUTPUT_TRANSFORM_NORMAL); // No transform applied
-    
-    // Send presentation time using the output's presentation timestamp
+
     auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
     frame.sendPresentationTime(timestamp);
 
-    // Send ready event to indicate successful capture
     frame.sendReady();
 }
 
-QRectF ImageCopyCaptureSessionImpl::getCursorRect() const
+QRectF ImageCopyCaptureSessionImpl::getCursorBox() const
 {
     Q_ASSERT(m_output != nullptr);
+
+    if (!m_cursorHasChanged) {
+        return m_lastCursorBox;
+    }
 
     if (m_overlayCursor) {
         const auto* cursors = Cursors::self();
@@ -262,19 +276,20 @@ QRectF ImageCopyCaptureSessionImpl::getCursorRect() const
     return QRectF();
 }
 
-void ImageCopyCaptureSessionImpl::finishUpdate(const QRect &cursorBox)
+void ImageCopyCaptureSessionImpl::updateTracking(const QRectF &cursorBox)
 {
-    m_accumulatedDamage.setRects(QSpan<QRect>());   // clear
+    m_frameDamage.setRects(QSpan<QRect>());   // clear
     m_cursorHasChanged = false;
     m_lastCursorBox = cursorBox;
 }
 
-void ImageCopyCaptureSessionImpl::sendUpdatedContents()
+void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 {
-    // Skip if there are no updates
-    if (m_accumulatedDamage.isEmpty() && !m_cursorHasChanged)
+    // Skip if there are no updates (yet)
+    if (m_frameDamage.isEmpty() && !m_cursorHasChanged)
         return;
 
+    // Skip if the client destroyed the frame
     auto* frame = getCurrentFrame();
     if (frame == nullptr)
         return;
@@ -286,35 +301,36 @@ void ImageCopyCaptureSessionImpl::sendUpdatedContents()
         return;
     }
 
-    auto cursorRect = getCursorRect();
+    QRectF newCursorBox = getCursorBox();
 
-    if (m_lastCursorBox.isValid()) {
-        m_accumulatedDamage += m_lastCursorBox;
-    }
+    // Damage old and new locations of cursor
+    if (m_cursorHasChanged) {
+        if (m_lastCursorBox.isValid()) {
+            m_frameDamage += m_lastCursorBox.toAlignedRect();
+        }
 
-    QRect newCursorBox;
-    if (cursorRect.isValid()) {
-        newCursorBox = cursorRect.toAlignedRect();
-        m_accumulatedDamage += newCursorBox;
+        if (newCursorBox.isValid()) {
+            m_frameDamage += newCursorBox.toAlignedRect();
+        }
     }
 
     // Send damage event(s).
-    if (m_accumulatedDamage.rectCount() <= 8) {
-        for (const QRect & rect : m_accumulatedDamage)
+    if (m_frameDamage.rectCount() <= 8) {
+        for (const QRect & rect : m_frameDamage)
             frame->sendDamage(rect);
     } else {
-        frame->sendDamage(m_accumulatedDamage.boundingRect());
+        frame->sendDamage(m_frameDamage.boundingRect());
     }
 
-    // Render the full frame (similar to screencopy behavior)
-    renderFrame(*frame, cursorRect);
+    renderFrame(*frame, newCursorBox);
 
-    finishUpdate(newCursorBox);
+    updateTracking(newCursorBox);
 }
 
 void ImageCopyCaptureSessionImpl::captureFrame()
 {
-    sendUpdatedContents();
+    // Send updates immediately if there are any
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::advertiseBufferConstraints()

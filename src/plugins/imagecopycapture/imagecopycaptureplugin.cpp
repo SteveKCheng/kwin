@@ -31,27 +31,16 @@ namespace KWin
 
 namespace
 {
-class OutputTracking : public QObject
+
+class ImageCopyCaptureSessionImpl : public ImageCopyCaptureSessionV1Interface
 {
     Q_OBJECT
 
 public:
-    explicit OutputTracking(Output* output);
+    ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor);
 
-    /**
-     * @brief Get the output that this object is tracking.
-     */
-    Output * getOutput() const { return m_output.get(); }
-
-    /**
-     * @brief Implementation of ImageCopyCaptureSessionV1Interface::prepareFrame for this output.
-     */
-    void prepareFrame(ImageCopyCaptureSessionV1Interface* session);
-
-    /**
-     * @brief Implementation of ImageCopyCaptureSessionV1Interface::captureFrame for this output.
-     */
-    void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage, bool overlayCursor);
+    void advertiseBufferConstraints() override;
+    void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage) override;
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
@@ -59,11 +48,21 @@ private Q_SLOTS:
     void handleCursorMoved(Cursor *cursor, const QPointF &position);
     void handleCursorHidden();
 
+
 private:
     /**
      * @brief The display output that is being captured by this frame.
+     *
+     * Part of the parameters set by the client.
      */
     const QPointer<Output> m_output;
+
+    /**
+     * @brief Whether the cursor should be rendered as part of the frame.
+     *
+     * Part of the parameters set by the client.
+     */
+    const bool m_overlayCursor;
 
     /**
      * @brief True if the cursor has been invalidated or has moved since the last
@@ -90,16 +89,6 @@ private:
     QRect m_lastCursorBox;
 
     QPointer<ImageCopyCaptureFrameV1Interface> m_pendingFrame;
-    bool m_pendingOverlayCursor = false;
-
-    /**
-     * @brief Set up connections to the underlying Output to watch for changes.
-     *
-     * This method is called once from the constructor.  The connection must last
-     * for the lifetime of this frame, since the client can call capture
-     * at any time in the future.
-     */
-    void trackOutput();
 
     /**
      * @brief Render the contents of the output into the frame's buffer.
@@ -110,7 +99,7 @@ private:
      * This method also updates m_lastCursorBox as part of rendering the
      * cursor as part of the frame.
      */
-    void renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect, bool overlayCursor);
+    void renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect);
 
     /**
      * @brief Update internal tracking variables after an update has been
@@ -142,23 +131,22 @@ private:
     QRectF getCursorRect() const;
 };
 
-OutputTracking::OutputTracking(Output* output)
-    : m_output(output)
+ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor)
+    : ImageCopyCaptureSessionV1Interface(manager)
+    , m_output(output)
+    , m_overlayCursor(overlayCursor)
 {
-    trackOutput();
+    connect(m_output.get(), &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputChange);
+
+    if (overlayCursor) {
+        auto* cursors = Cursors::self();
+        connect(cursors, &Cursors::currentCursorChanged, this, &ImageCopyCaptureSessionImpl::handleCursorChanged);
+        connect(cursors, &Cursors::hiddenChanged, this, &ImageCopyCaptureSessionImpl::handleCursorHidden);
+        connect(cursors, &Cursors::positionChanged, this, &ImageCopyCaptureSessionImpl::handleCursorMoved);
+    }
 }
 
-void OutputTracking::trackOutput()
-{
-    connect(m_output.get(), &Output::outputChange, this, &OutputTracking::handleOutputChange);
-
-    auto* cursors = Cursors::self();
-    connect(cursors, &Cursors::currentCursorChanged, this, &OutputTracking::handleCursorChanged);
-    connect(cursors, &Cursors::hiddenChanged, this, &OutputTracking::handleCursorHidden);
-    connect(cursors, &Cursors::positionChanged, this, &OutputTracking::handleCursorMoved);
-}
-
-void OutputTracking::handleOutputChange(const QRegion &damageLogical)
+void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
 {
     auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
     m_accumulatedDamage |= damagePhysical;
@@ -166,19 +154,19 @@ void OutputTracking::handleOutputChange(const QRegion &damageLogical)
     sendUpdatedContents();
 }
 
-void OutputTracking::handleCursorChanged(Cursor* cursor)
+void ImageCopyCaptureSessionImpl::handleCursorChanged(Cursor* cursor)
 {
     m_cursorHasChanged = true;
     sendUpdatedContents();
 }
 
-void OutputTracking::handleCursorHidden()
+void ImageCopyCaptureSessionImpl::handleCursorHidden()
 {
     m_cursorHasChanged = true;
     sendUpdatedContents();
 }
 
-void OutputTracking::handleCursorMoved(Cursor *cursor, const QPointF &position)
+void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPointF &position)
 {
     m_cursorHasChanged = true;
     sendUpdatedContents();
@@ -194,7 +182,7 @@ uint32_t drmFormatToShmFormat(uint32_t drmFormat)
     }
 }
 
-void OutputTracking::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect, bool overlayCursor)
+void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect)
 {
     Output* output = m_output.get();
 
@@ -240,7 +228,7 @@ void OutputTracking::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRect
 
     grabTexture(texture.get(), &frameImage);
 
-    if (overlayCursor && cursorRect.isValid()) {
+    if (cursorRect.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
         if (!cursorImage.isNull()) {
             QPainter painter(&frameImage);
@@ -265,27 +253,29 @@ void OutputTracking::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRect
     frame.sendReady();
 }
 
-QRectF OutputTracking::getCursorRect() const
+QRectF ImageCopyCaptureSessionImpl::getCursorRect() const
 {
     Q_ASSERT(m_output != nullptr);
 
-    const auto* cursors = Cursors::self();
-    const Cursor* cursor = cursors->currentCursor();
-    if (!cursors->isCursorHidden() && cursor != nullptr) {
-        return scaledRect(cursor->geometry(), m_output->scale());
+    if (m_overlayCursor) {
+        const auto* cursors = Cursors::self();
+        const Cursor* cursor = cursors->currentCursor();
+        if (!cursors->isCursorHidden() && cursor != nullptr) {
+            return scaledRect(cursor->geometry(), m_output->scale());
+        }
     }
 
     return QRectF();
 }
 
-void OutputTracking::finishUpdate(const QRect &cursorBox)
+void ImageCopyCaptureSessionImpl::finishUpdate(const QRect &cursorBox)
 {
     m_accumulatedDamage.setRects(QSpan<QRect>());   // clear
     m_cursorHasChanged = false;
     m_lastCursorBox = cursorBox;
 }
 
-void OutputTracking::sendUpdatedContents()
+void ImageCopyCaptureSessionImpl::sendUpdatedContents()
 {
     // Skip if there are no updates
     if (m_accumulatedDamage.isEmpty() && !m_cursorHasChanged)
@@ -310,15 +300,15 @@ void OutputTracking::sendUpdatedContents()
     }
 
     // Render the full frame (similar to screencopy behavior)
-    renderFrame(*frame, cursorRect, m_pendingOverlayCursor);
+    renderFrame(*frame, cursorRect);
 
     finishUpdate(newCursorBox);
 }
 
-void OutputTracking::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage, bool overlayCursor)
+void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage)
 {
     // Fail if output has already gone away.
-    if (getOutput() == nullptr) {
+    if (m_output == nullptr) {
         qWarning() << "output has gone away";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
         return;
@@ -326,25 +316,24 @@ void OutputTracking::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool 
 
     if (waitForDamage) {
         m_pendingFrame = frame;
-        m_pendingOverlayCursor = overlayCursor;
         sendUpdatedContents();
     } else {
         auto cursorRect = getCursorRect();
-        renderFrame(*frame, cursorRect, overlayCursor);
+        renderFrame(*frame, cursorRect);
         finishUpdate(cursorRect.toAlignedRect());
     }
 }
 
-void OutputTracking::prepareFrame(ImageCopyCaptureSessionV1Interface* session)
+void ImageCopyCaptureSessionImpl::advertiseBufferConstraints()
 {
     // Send buffer constraints
     auto bufferFormat = getBufferFormat();
-    session->sendBufferSize(bufferFormat.bufferSize);
-    session->sendShmFormat(bufferFormat.pixelFormat);
-    session->sendConstraintsDone();
+    sendBufferSize(bufferFormat.bufferSize);
+    sendShmFormat(bufferFormat.pixelFormat);
+    sendConstraintsDone();
 }
 
-ImageCopyCaptureSessionV1Interface::BufferFormat OutputTracking::getBufferFormat() const
+ImageCopyCaptureSessionV1Interface::BufferFormat ImageCopyCaptureSessionImpl::getBufferFormat() const
 {
     Q_ASSERT(m_output != nullptr);
 
@@ -354,51 +343,6 @@ ImageCopyCaptureSessionV1Interface::BufferFormat OutputTracking::getBufferFormat
 
     return { pixelFormat, bufferSize, rowStride };
 }
-
-class ImageCopyCaptureSessionImpl : public ImageCopyCaptureSessionV1Interface
-{
-    Q_OBJECT
-
-public:
-    ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor)
-        : ImageCopyCaptureSessionV1Interface(manager)
-        , m_output(output)
-        , m_overlayCursor(overlayCursor)
-        , m_outputTracking(std::make_unique<OutputTracking>(output))
-    {
-    }
-
-    void prepareFrame() override
-    {
-        m_outputTracking->prepareFrame(this);
-    }
-
-    void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage) override
-    {
-        if (!m_outputTracking) {
-            // Output may have gone away
-            frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
-            return;
-        }
-
-        m_outputTracking->captureFrame(frame, waitForDamage, m_overlayCursor);
-    }
-
-    Output* getOutput() const
-    {
-        return m_output.get();
-    }
-
-    bool shouldOverlayCursor() const
-    {
-        return m_overlayCursor;
-    }
-
-private:
-    QPointer<Output> m_output;
-    bool m_overlayCursor;
-    std::unique_ptr<OutputTracking> m_outputTracking;
-};
 
 class ImageCopyCaptureManagerImpl final : public ImageCopyCaptureManagerV1Interface
 {

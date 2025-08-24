@@ -223,7 +223,7 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
     session->d->init(sessionResource);
 
     // Send initial buffer constraints
-    session->prepareFrame();
+    session->advertiseBufferConstraints();
 }
 
 ImageCopyCaptureManagerV1Interface::ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent)

@@ -73,14 +73,17 @@ public:
     ~ImageCopyCaptureSessionV1Interface() override;
 
     /**
-     * @brief Prepare to capture frames in this session.
+     * @brief Tell the client what buffer formats this capture session are compatible with.
      *
      * This method should inform the client of the required buffer constraints
-     * (buffer size, formats, etc.) and set up internal tracking for the display output.
+     * through the methods #sendBufferSize, #sendShmFormat, etc.
      *
-     * This method should be called when a session is first created.
+     * This method is called once on creating the session (on what is returned by
+     * ImageCopyCaptureManagerV1Interface::createSession), but the session may autonomously
+     * re-advertise the buffer constraints if they change, in accordance with the
+     * protocol specification.
      */
-    virtual void prepareFrame() = 0;
+    virtual void advertiseBufferConstraints() = 0;
 
     /**
      * @brief Request for capturing one frame from the client.

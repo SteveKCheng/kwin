@@ -170,8 +170,11 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
 
 void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
 {
-    auto damagePhysical = scaleRegion(damageLogical, m_output->scale());
-    m_frameDamage |= damagePhysical;
+    auto outputScale = m_output->scale();
+    for (const auto & rectLogical : damageLogical) {
+        auto rectPhysical = scaledRect(rectLogical.toRectF(), outputScale);
+        m_frameDamage += rectPhysical.toAlignedRect();
+    }
 
     sendFrameUpdatesIfAny();
 }
@@ -318,7 +321,6 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 
     // Damage old and new locations of cursor
     if (m_cursorHasChanged) {
-
         if (m_lastCursorBox.isValid()) {
             m_frameDamage += m_lastCursorBox.toAlignedRect().intersected(wholeArea);
         }

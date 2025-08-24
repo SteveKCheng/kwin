@@ -130,7 +130,6 @@ protected:
     void ext_image_copy_capture_frame_v1_destroy(Resource *resource) override
     {
         wl_resource_destroy(resource->handle);
-        m_shmClientBuffer = nullptr;
     }
 
     void ext_image_copy_capture_frame_v1_attach_buffer(Resource *resource, struct ::wl_resource *buffer) override

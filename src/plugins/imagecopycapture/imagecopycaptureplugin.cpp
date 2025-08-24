@@ -311,22 +311,28 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
         return;
     }
 
+    // The cursor box may exceed the extents of the output, so it needs
+    // to be clipped for reporting it as damage to the client.  We also do
+    // the same, defensively, for the other rectangles of m_frameDamage.
+    auto wholeArea = QRect(QPoint(0, 0), m_output->pixelSize());
+
     // Damage old and new locations of cursor
     if (m_cursorHasChanged) {
+
         if (m_lastCursorBox.isValid()) {
-            m_frameDamage += m_lastCursorBox.toAlignedRect();
+            m_frameDamage += m_lastCursorBox.toAlignedRect().intersected(wholeArea);
         }
         if (newCursorBox.isValid()) {
-            m_frameDamage += newCursorBox.toAlignedRect();
+            m_frameDamage += newCursorBox.toAlignedRect().intersected(wholeArea);
         }
     }
 
     // Send damage event(s).
     if (m_frameDamage.rectCount() <= 8) {
         for (const QRect & rect : m_frameDamage)
-            frame->sendDamage(rect);
+            frame->sendDamage(rect.intersected(wholeArea));
     } else {
-        frame->sendDamage(m_frameDamage.boundingRect());
+        frame->sendDamage(m_frameDamage.boundingRect().intersected(wholeArea));
     }
 
     frame->sendReady();

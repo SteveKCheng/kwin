@@ -42,7 +42,7 @@ public:
                                 Output *output,
                                 bool overlayCursor);
 
-    void captureFrame(ImageCopyCaptureFrameV1Interface* frame) override;
+    void captureFrame() override;
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
@@ -92,8 +92,6 @@ private:
      * This region is expressed in physical (scaled) coordinates.
      */
     QRect m_lastCursorBox;
-
-    QPointer<ImageCopyCaptureFrameV1Interface> m_pendingFrame;
 
     void advertiseBufferConstraints();
 
@@ -271,11 +269,16 @@ void ImageCopyCaptureSessionImpl::sendUpdatedContents()
     if (m_accumulatedDamage.isEmpty() && !m_cursorHasChanged)
         return;
 
-    auto* frame = m_pendingFrame.get();
+    auto* frame = getCurrentFrame();
     if (frame == nullptr)
         return;
 
-    m_pendingFrame = nullptr;
+    // Fail if output has already gone away.
+    if (m_output == nullptr) {
+        qDebug() << "Output has gone away while a frame is being captured";
+        frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
+        return;
+    }
 
     auto cursorRect = getCursorRect();
 
@@ -303,16 +306,8 @@ void ImageCopyCaptureSessionImpl::sendUpdatedContents()
     finishUpdate(newCursorBox);
 }
 
-void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface* frame)
+void ImageCopyCaptureSessionImpl::captureFrame()
 {
-    // Fail if output has already gone away.
-    if (m_output == nullptr) {
-        qWarning() << "output has gone away";
-        frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
-        return;
-    }
-
-    m_pendingFrame = frame;
     sendUpdatedContents();
 }
 

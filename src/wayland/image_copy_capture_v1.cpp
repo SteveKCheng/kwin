@@ -67,6 +67,8 @@ public:
     QPointer<ImageCopyCaptureFrameV1Interface> m_currentFrame;
     bool m_ownsResource = false;
 
+    ImageCopyCaptureFrameV1Interface* getCurrentFrame() const;
+
 private:
     /**
      * @brief Pointer to the owner of this private pimpl.
@@ -102,6 +104,7 @@ public:
 
     QPointer<ShmClientBuffer> m_shmClientBuffer;
     bool m_captureRequested = false;
+    bool m_captureDone = false;
 
 private:
     /**
@@ -178,8 +181,7 @@ protected:
         }
 
         m_captureRequested = true;
-        
-        m_session->captureFrame(m_parent);
+        m_session->captureFrame();
     }
 };
 
@@ -296,6 +298,17 @@ void ImageCopyCaptureSessionV1Interface::sendStopped()
     d->send_stopped();
 }
 
+ImageCopyCaptureFrameV1Interface* ImageCopyCaptureSessionV1Interface::getCurrentFrame() const
+{
+    return d->getCurrentFrame();
+}
+
+ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1InterfacePrivate::getCurrentFrame() const
+{
+    auto *frame = m_currentFrame.get();
+    return (frame != nullptr && frame->d->m_captureRequested && !frame->d->m_captureDone) ? frame : nullptr;
+}
+
 //
 // Implementation of ImageCopyCaptureFrameV1Interface
 //
@@ -317,16 +330,19 @@ ShmClientBuffer* ImageCopyCaptureFrameV1Interface::takeShmClientBuffer()
 
 void ImageCopyCaptureFrameV1Interface::sendTransform(uint32_t transform)
 {
+    Q_ASSERT(!d->m_captureDone);
     d->send_transform(transform);
 }
 
 void ImageCopyCaptureFrameV1Interface::sendDamage(const QRect &rect)
 {
+    Q_ASSERT(!d->m_captureDone);
     d->send_damage(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
 void ImageCopyCaptureFrameV1Interface::sendPresentationTime(std::chrono::nanoseconds timestamp)
 {
+    Q_ASSERT(!d->m_captureDone);
     uint64_t tv_sec = std::chrono::duration_cast<std::chrono::seconds>(timestamp).count();
     uint32_t tv_sec_hi = tv_sec >> 32;
     uint32_t tv_sec_lo = tv_sec & 0xFFFFFFFF;
@@ -336,11 +352,15 @@ void ImageCopyCaptureFrameV1Interface::sendPresentationTime(std::chrono::nanosec
 
 void ImageCopyCaptureFrameV1Interface::sendReady()
 {
+    Q_ASSERT(!d->m_captureDone);
+    d->m_captureDone = true;
     d->send_ready();
 }
 
 void ImageCopyCaptureFrameV1Interface::sendFailed(FailureReason reason)
 {
+    Q_ASSERT(!d->m_captureDone);
+    d->m_captureDone = true;
     d->send_failed(static_cast<uint>(reason));
 }
 

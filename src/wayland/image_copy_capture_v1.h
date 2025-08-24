@@ -91,9 +91,9 @@ protected:
     /**
      * @brief Request for capturing one frame from the client.
      *
-     * @param frame The frame object created by the client that is the target of the capture.
+     * The frame being captured is reported by #getCurrentFrame.
      */
-    virtual void captureFrame(ImageCopyCaptureFrameV1Interface* frame) = 0;
+    virtual void captureFrame() = 0;
 
     /**
      * Send buffer size constraint to the client.
@@ -124,6 +124,25 @@ protected:
      * Send stopped event to indicate the session is no longer available.
      */
     void sendStopped();
+
+    /**
+     * Get the current frame being captured by this session, if any.
+     *
+     * Note that the protocol specification disallows more than one frame to exist
+     * for a given session at any time, so the caller does not need to worry
+     * about saving the return value.
+     *
+     * Because the client can destroy a frame at any time,
+     * this method may return null in the middle of a frame capture.  In that case
+     * the caller should abandon capturing the frame.
+     *
+     * This method also returns null if the Wayland client has created a frame
+     * from this session but has not yet requested it to be captured; or, if
+     * the (preceding) capture is already complete (by having called
+     * ImageCopyCaptureFrameV1Interface::sendReady
+     * or ImageCopyCaptureFrameV1Interface::sendFailed).
+     */
+    ImageCopyCaptureFrameV1Interface * getCurrentFrame() const;
 
 private:
     friend class ImageCopyCaptureSessionV1InterfacePrivate;

@@ -122,26 +122,6 @@ public:
      */
     void sendStopped();
 
-    /**
-     * @brief Grouping of the parameters for buffer constraints.
-     */
-    struct BufferFormat
-    {
-        uint32_t pixelFormat;
-        QSize bufferSize;
-        int rowStride;
-
-        bool operator==(const BufferFormat &other) const
-        {
-            return pixelFormat == other.pixelFormat && bufferSize == other.bufferSize && rowStride == other.rowStride;
-        }
-
-        bool operator!=(const BufferFormat &other) const
-        {
-            return !operator==(other);
-        }
-    };
-
 public:
     explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
 

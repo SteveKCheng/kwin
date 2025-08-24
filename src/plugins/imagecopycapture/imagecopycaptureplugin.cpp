@@ -48,7 +48,6 @@ private Q_SLOTS:
     void handleCursorMoved(Cursor *cursor, const QPointF &position);
     void handleCursorHidden();
 
-
 private:
     /**
      * @brief The display output that is being captured by this frame.
@@ -119,14 +118,6 @@ private:
     void sendUpdatedContents();
 
     /**
-     * @brief Get the sole buffer format supported by this implementation,
-     *        for the targeted output.
-     *
-     * This method is factored out for validating the client's buffer's parameters.
-     */
-    ImageCopyCaptureSessionV1Interface::BufferFormat getBufferFormat() const;
-
-    /**
      * @brief Get the rectangular area where the (mouse) cursor is to be painted on the framebuffer.
      *
      * If there is no cursor to paint (including the case that it is hidden),
@@ -178,19 +169,10 @@ void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPoint
     sendUpdatedContents();
 }
 
-// Reverse the transformation done on the pixel format in ShmAttributes
-uint32_t drmFormatToShmFormat(uint32_t drmFormat)
-{
-    switch (drmFormat) {
-    case DRM_FORMAT_ARGB8888: return WL_SHM_FORMAT_ARGB8888;
-    case DRM_FORMAT_XRGB8888: return WL_SHM_FORMAT_XRGB8888;
-    default: return drmFormat;
-    }
-}
-
 void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect)
 {
     Output* output = m_output.get();
+    Q_ASSERT(output != nullptr);
 
     // Get the compositor texture for the output
     auto [texture, color] = Compositor::self()->textureForOutput(output);
@@ -207,16 +189,15 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     }
 
     // Validate buffer parameters.
+    // N.B. bufferAttributes->format is always in the DRM format even for ShmClientBuffer.
+    //      DRM_FORMAT_ARGB8888 is the equivalent of WL_SHM_FORMAT_ARGB8888.
+    //      See src/wayland/shmclientbuffer.cpp.
     const ShmAttributes* bufferAttributes = clientBuffer->shmAttributes();
-    auto bufferFormat = ImageCopyCaptureSessionV1Interface::BufferFormat{
-        drmFormatToShmFormat(bufferAttributes->format),
-        bufferAttributes->size,
-        bufferAttributes->stride,
-    };
-    if (bufferFormat != getBufferFormat()) {
+    if (bufferAttributes->format != DRM_FORMAT_ARGB8888 ||
+        bufferAttributes->size != output->pixelSize() ||
+        bufferAttributes->stride != output->pixelSize().width() * 4) {
         qWarning() << "Buffer passed for image copy capture has the wrong format; failing the request";
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
-        return;
     }
 
     auto mapping = clientBuffer->map(GraphicsBuffer::Write);
@@ -227,8 +208,8 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     }
 
     QImage frameImage{static_cast<uchar*>(mapping.data),
-                      bufferFormat.bufferSize.width(),
-                      bufferFormat.bufferSize.height(),
+                      bufferAttributes->size.width(),
+                      bufferAttributes->size.height(),
                       mapping.stride,
                       QImage::Format_ARGB32_Premultiplied};
 
@@ -326,22 +307,9 @@ void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface*
 
 void ImageCopyCaptureSessionImpl::advertiseBufferConstraints()
 {
-    // Send buffer constraints
-    auto bufferFormat = getBufferFormat();
-    sendBufferSize(bufferFormat.bufferSize);
-    sendShmFormat(bufferFormat.pixelFormat);
+    sendBufferSize(m_output->pixelSize());
+    sendShmFormat(WL_SHM_FORMAT_ARGB8888);
     sendConstraintsDone();
-}
-
-ImageCopyCaptureSessionV1Interface::BufferFormat ImageCopyCaptureSessionImpl::getBufferFormat() const
-{
-    Q_ASSERT(m_output != nullptr);
-
-    uint32_t pixelFormat = WL_SHM_FORMAT_ARGB8888;
-    QSize bufferSize = m_output->pixelSize();
-    int rowStride = bufferSize.width() * 4;
-
-    return { pixelFormat, bufferSize, rowStride };
 }
 
 class ImageCopyCaptureManagerImpl final : public ImageCopyCaptureManagerV1Interface

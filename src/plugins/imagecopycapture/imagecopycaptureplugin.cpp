@@ -111,12 +111,15 @@ private:
     /**
      * @brief Render the contents of the output into the frame's buffer.
      *
-     * This method marks the frame as "ready" after rendering into the buffer.
-     * So, all "damage" events must be sent out for the frame before calling this method.
+     * This method also sends the meta-information on the frame contents,
+     * but does not mark the frame as "ready".
      *
      * Called as part of #sendCapturedFrame.
+     *
+     * @return True if rendering was successful; false if the frame has been marked
+     *         has failed.
      */
-    void renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect);
+    bool renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorBox);
 
     /**
      * @brief Update internal tracking variables after a frame update has been
@@ -191,7 +194,7 @@ void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPoint
     sendFrameUpdatesIfAny();
 }
 
-void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect)
+bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorBox)
 {
     Output* output = m_output.get();
     Q_ASSERT(output != nullptr);
@@ -200,14 +203,14 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     auto [texture, color] = Compositor::self()->textureForOutput(output);
     if (!texture) {
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
-        return;
+        return false;
     }
 
     // Map the client buffer to get direct access to its memory
     auto* clientBuffer = frame.getShmClientBuffer();
     if (!clientBuffer) {
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
-        return;
+        return false;
     }
 
     // Validate buffer parameters.
@@ -220,13 +223,14 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
         bufferAttributes->stride != output->pixelSize().width() * 4) {
         qWarning() << "Buffer passed for image copy capture has the wrong format; failing the request";
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
+        return false;
     }
 
     auto mapping = clientBuffer->map(GraphicsBuffer::Write);
     if (!mapping.data) {
         clientBuffer->unmap();
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
-        return;
+        return false;
     }
 
     QImage frameImage{static_cast<uchar*>(mapping.data),
@@ -238,23 +242,21 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     grabTexture(texture.get(), &frameImage);
 
     // Paint cursor (if requested)
-    if (cursorRect.isValid()) {
+    if (cursorBox.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
         if (!cursorImage.isNull()) {
             QPainter painter(&frameImage);
-            painter.drawImage(cursorRect, cursorImage);
+            painter.drawImage(cursorBox, cursorImage);
         }
     }
 
-    // Finish this frame
+    // Finish up with frame meta-information
     clientBuffer->unmap();
-
     frame.sendTransform(WL_OUTPUT_TRANSFORM_NORMAL); // No transform applied
-
     auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
     frame.sendPresentationTime(timestamp);
 
-    frame.sendReady();
+    return true;
 }
 
 QRectF ImageCopyCaptureSessionImpl::getCursorBox() const
@@ -286,13 +288,15 @@ void ImageCopyCaptureSessionImpl::updateTracking(const QRectF &cursorBox)
 void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 {
     // Skip if there are no updates (yet)
-    if (m_frameDamage.isEmpty() && !m_cursorHasChanged)
+    if (m_frameDamage.isEmpty() && !m_cursorHasChanged) {
         return;
+    }
 
     // Skip if the client destroyed the frame
     auto* frame = getCurrentFrame();
-    if (frame == nullptr)
+    if (frame == nullptr) {
         return;
+    }
 
     // Fail if output has already gone away.
     if (m_output == nullptr) {
@@ -303,12 +307,15 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 
     QRectF newCursorBox = getCursorBox();
 
+    if (!renderFrame(*frame, newCursorBox)) {
+        return;
+    }
+
     // Damage old and new locations of cursor
     if (m_cursorHasChanged) {
         if (m_lastCursorBox.isValid()) {
             m_frameDamage += m_lastCursorBox.toAlignedRect();
         }
-
         if (newCursorBox.isValid()) {
             m_frameDamage += newCursorBox.toAlignedRect();
         }
@@ -322,7 +329,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
         frame->sendDamage(m_frameDamage.boundingRect());
     }
 
-    renderFrame(*frame, newCursorBox);
+    frame->sendReady();
 
     updateTracking(newCursorBox);
 }

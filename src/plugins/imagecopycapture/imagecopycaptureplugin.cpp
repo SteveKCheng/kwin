@@ -43,6 +43,7 @@ public:
                                 bool overlayCursor);
 
     void captureFrame() override;
+    void addClientBufferDamage(const QRect & damage) override {}
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);

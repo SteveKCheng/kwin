@@ -57,6 +57,9 @@ protected:
      * through the methods such as ImageCopyCaptureSessionV1Interface::sendBufferSize
      * and ImageCopyCaptureSessionV1Interface::sendShmFormat.
      *
+     * This method is invoked in reaction to the client issuing the \c create_session
+     * request on the "image copy capture" manager.
+     *
      * @param resource The Wayland resource behind the implementation.
      *                 Should be passed to the constructor of
      *                 ImageCopyCaptureSessionV1Interface.
@@ -91,9 +94,29 @@ protected:
     /**
      * @brief Request for capturing one frame from the client.
      *
+     * This method is invoked in reaction to the client issuing the \c capture request
+     * on a frame.
+     *
      * The frame being captured is reported by #getCurrentFrame.
      */
     virtual void captureFrame() = 0;
+
+    /**
+     * @brief Register a rectangle in the client's buffer that must be considered
+     *        damaged.
+     *
+     * This method is invoked in reaction to the client issuing the \c damage_buffer request
+     * on a frame.  As the protocol specification says, it enables the compositor
+     * to optimize by reducing copying.
+     *
+     * This method may be invoked multiple times to register a union of rectangles
+     * to be damaged.  These invocations happen before #captureFrame but after
+     * the preceding frame is destroyed (by the client).
+     *
+     * @param damage An area needs to be re-painted into the buffer of the next
+     *               frame that is captured.
+     */
+    virtual void addClientBufferDamage(const QRect & damage) = 0;
 
     /**
      * Send buffer size constraint to the client.

@@ -175,9 +175,7 @@ protected:
 
         m_captureRequested = true;
         
-        // For the new protocol, we treat all captures as potentially waiting for damage
-        // (similar to copy_with_damage in the old protocol)
-        m_session->captureFrame(m_parent, true);
+        m_session->captureFrame(m_parent);
     }
 };
 

@@ -89,9 +89,8 @@ public:
      * @brief Request for capturing one frame from the client.
      *
      * @param frame The frame object created by the client that is the target of the capture.
-     * @param waitForDamage If true, wait for damage before capturing. Otherwise capture immediately.
      */
-    virtual void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage) = 0;
+    virtual void captureFrame(ImageCopyCaptureFrameV1Interface* frame) = 0;
 
     /**
      * Send buffer size constraint to the client.

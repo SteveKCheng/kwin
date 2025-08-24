@@ -40,7 +40,7 @@ public:
     ImageCopyCaptureSessionImpl(ImageCopyCaptureManagerV1Interface *manager, Output *output, bool overlayCursor);
 
     void advertiseBufferConstraints() override;
-    void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage) override;
+    void captureFrame(ImageCopyCaptureFrameV1Interface* frame) override;
 
 private Q_SLOTS:
     void handleOutputChange(const QRegion &damageLogical);
@@ -77,6 +77,10 @@ private:
      * This region is expressed in physical (scaled) coordinates.
      *
      * This region does not include the overlaid cursor; that is tracked separately.
+     *
+     * On initialize the whole output is considered damage, which makes the
+     * first capture request to be satisfied immediately, and the frame
+     * sent out will contain everything.
      */
     QRegion m_accumulatedDamage;
 
@@ -144,6 +148,8 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(ImageCopyCaptureManager
         connect(cursors, &Cursors::hiddenChanged, this, &ImageCopyCaptureSessionImpl::handleCursorHidden);
         connect(cursors, &Cursors::positionChanged, this, &ImageCopyCaptureSessionImpl::handleCursorMoved);
     }
+
+    m_accumulatedDamage += QRect(QPoint(0,0), output->pixelSize());
 }
 
 void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
@@ -305,7 +311,7 @@ void ImageCopyCaptureSessionImpl::sendUpdatedContents()
     finishUpdate(newCursorBox);
 }
 
-void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage)
+void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface* frame)
 {
     // Fail if output has already gone away.
     if (m_output == nullptr) {
@@ -314,14 +320,8 @@ void ImageCopyCaptureSessionImpl::captureFrame(ImageCopyCaptureFrameV1Interface*
         return;
     }
 
-    if (waitForDamage) {
-        m_pendingFrame = frame;
-        sendUpdatedContents();
-    } else {
-        auto cursorRect = getCursorRect();
-        renderFrame(*frame, cursorRect);
-        finishUpdate(cursorRect.toAlignedRect());
-    }
+    m_pendingFrame = frame;
+    sendUpdatedContents();
 }
 
 void ImageCopyCaptureSessionImpl::advertiseBufferConstraints()

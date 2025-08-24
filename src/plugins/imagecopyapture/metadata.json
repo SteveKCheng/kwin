@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "steve@kde.org",
+                "Name": "Steve"
+            }
+        ],
+        "Category": "Virtual Desktop",
+        "Description": "Image copy capture protocol support",
+        "EnabledByDefault": true,
+        "Id": "imagecopyapture",
+        "License": "LGPL-2.0+",
+        "Name": "Image Copy Capture",
+        "Version": "1.0"
+    }
+}

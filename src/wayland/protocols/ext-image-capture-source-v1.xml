@@ -83,6 +83,11 @@
     </request>
   </interface>
 
+  <!-- 
+  *** Commented out because we do not support this in kwin currently.
+  *** We cannot just omit the implementation in the main source code
+  *** because the code-generation infrastructure assumes it exists.
+
   <interface name="ext_foreign_toplevel_image_capture_source_manager_v1" version="1">
     <description summary="image capture source manager for foreign toplevels">
       A manager for creating image capture source objects for
@@ -106,4 +111,5 @@
       </description>
     </request>
   </interface>
+  -->	  
 </protocol>

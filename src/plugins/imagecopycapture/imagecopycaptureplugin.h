@@ -13,13 +13,13 @@ namespace KWin
 class ImageCopyCaptureManagerV1Interface;
 class OutputImageCaptureSourceManagerV1Interface;
 
-class ImageCopyapturePlugin : public Plugin
+class ImageCopyCapturePlugin : public Plugin
 {
     Q_OBJECT
 
 public:
-    explicit ImageCopyapturePlugin();
-    ~ImageCopyapturePlugin() override;
+    explicit ImageCopyCapturePlugin();
+    ~ImageCopyCapturePlugin() override;
 
 private:
     const std::unique_ptr<ImageCopyCaptureManagerV1Interface> m_imageCopyCaptureManager;

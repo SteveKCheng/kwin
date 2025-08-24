@@ -10,7 +10,7 @@
 
 #include <drm_fourcc.h>
 
-#include "imagecopyaptureplugin.h"
+#include "imagecopycaptureplugin.h"
 #include "wayland/output.h"
 #include "wayland/image_copy_capture_v1.h"
 #include "wayland/image_capture_source_v1.h"
@@ -405,7 +405,7 @@ class ImageCopyCaptureManagerImpl final : public ImageCopyCaptureManagerV1Interf
     Q_OBJECT
 
 public:
-    ImageCopyCaptureManagerImpl(Display *display, ImageCopyapturePlugin* parent)
+    ImageCopyCaptureManagerImpl(Display *display, ImageCopyCapturePlugin* parent)
         : ImageCopyCaptureManagerV1Interface(display, parent)
     {
     }
@@ -420,17 +420,17 @@ protected:
 } // anonymous namespace
 
 //
-// Implementation of ImageCopyapturePlugin
+// Implementation of ImageCopyCapturePlugin
 //
 
-ImageCopyapturePlugin::ImageCopyapturePlugin()
+ImageCopyCapturePlugin::ImageCopyCapturePlugin()
     : m_imageCopyCaptureManager(std::make_unique<ImageCopyCaptureManagerImpl>(waylandServer()->display(), this))
     , m_outputSourceManager(std::make_unique<OutputImageCaptureSourceManagerV1Interface>(waylandServer()->display(), this))
 {
 }
 
-ImageCopyapturePlugin::~ImageCopyapturePlugin() = default;
+ImageCopyCapturePlugin::~ImageCopyCapturePlugin() = default;
 
 } // namespace KWin
 
-#include "imagecopyaptureplugin.moc"
+#include "imagecopycaptureplugin.moc"

@@ -9,7 +9,7 @@
         "Category": "Virtual Desktop",
         "Description": "Image copy capture protocol support",
         "EnabledByDefault": true,
-        "Id": "imagecopyapture",
+        "Id": "imagecopycapture",
         "License": "LGPL-2.0+",
         "Name": "Image Copy Capture",
         "Version": "1.0"

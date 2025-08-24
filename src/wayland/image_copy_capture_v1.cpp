@@ -5,6 +5,7 @@
 */
 
 #include "image_copy_capture_v1.h"
+#include "image_capture_source_v1.h"
 #include "display.h"
 #include "output.h"
 #include "wayland/output.h"
@@ -41,13 +42,25 @@ protected:
 
     void ext_image_copy_capture_manager_v1_create_session(Resource *resource,
                                                          uint32_t session_id,
-                                                         struct ::wl_resource *source,
+                                                         struct ::wl_resource *source_resource,
                                                          uint32_t options) override
     {
-        // For now, assume source is an output (we'll need to implement image capture sources later)
-        OutputInterface *outputInterface = OutputInterface::get(source);
-        if (!outputInterface || !outputInterface->handle()) {
-            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "invalid source");
+        // Extract the ImageCaptureSourceV1Interface from the wl_resource
+        ImageCaptureSourceV1Interface *sourceInterface = ImageCaptureSourceV1Interface::get(source_resource);
+        if (!sourceInterface) {
+            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "invalid image capture source");
+            return;
+        }
+
+        // For now, we only support output sources
+        if (sourceInterface->sourceType() != ImageCaptureSourceType::Output) {
+            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "unsupported source type");
+            return;
+        }
+
+        Output *output = sourceInterface->output();
+        if (!output) {
+            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "source has no valid output");
             return;
         }
 
@@ -59,7 +72,7 @@ protected:
 
         bool overlayCursor = (options & QtWaylandServer::ext_image_copy_capture_manager_v1::options_paint_cursors) != 0;
         
-        auto* session = m_parent->createSession(outputInterface->handle(), overlayCursor);
+        auto* session = m_parent->createSession(output, overlayCursor);
         if (!session) {
             wl_resource_destroy(sessionResource);
             return;

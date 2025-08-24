@@ -11,6 +11,7 @@
 namespace KWin
 {
 class ImageCopyCaptureManagerV1Interface;
+class OutputImageCaptureSourceManagerV1Interface;
 
 class ImageCopyapturePlugin : public Plugin
 {
@@ -22,6 +23,7 @@ public:
 
 private:
     const std::unique_ptr<ImageCopyCaptureManagerV1Interface> m_imageCopyCaptureManager;
+    const std::unique_ptr<OutputImageCaptureSourceManagerV1Interface> m_outputSourceManager;
 };
 
 } // namespace KWin

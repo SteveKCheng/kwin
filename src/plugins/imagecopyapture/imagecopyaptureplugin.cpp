@@ -13,6 +13,7 @@
 #include "imagecopyaptureplugin.h"
 #include "wayland/output.h"
 #include "wayland/image_copy_capture_v1.h"
+#include "wayland/image_capture_source_v1.h"
 #include "wayland/shmclientbuffer_p.h"
 #include "wayland_server.h"
 
@@ -424,6 +425,7 @@ protected:
 
 ImageCopyapturePlugin::ImageCopyapturePlugin()
     : m_imageCopyCaptureManager(std::make_unique<ImageCopyCaptureManagerImpl>(waylandServer()->display(), this))
+    , m_outputSourceManager(std::make_unique<OutputImageCaptureSourceManagerV1Interface>(waylandServer()->display(), this))
 {
 }
 

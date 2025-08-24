@@ -40,6 +40,7 @@ ecm_add_qtwayland_server_protocol_kde(WaylandProtocols_xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/wlr-data-control-unstable-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/wlr-layer-shell-unstable-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/ext-image-copy-capture-v1.xml
+        ${PROJECT_SOURCE_DIR}/src/wayland/protocols/ext-image-capture-source-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/xx-session-management-v1.xml
 
         ${WaylandProtocols_DATADIR}/stable/presentation-time/presentation-time.xml
@@ -144,6 +145,7 @@ target_sources(kwin PRIVATE
     relativepointer_v1.cpp
     screencast_v1.cpp
     image_copy_capture_v1.cpp
+    image_capture_source_v1.cpp
     screenedge_v1.cpp
     seat.cpp
     securitycontext_v1.cpp
@@ -234,6 +236,7 @@ install(FILES
     relativepointer_v1.h
     screencast_v1.h
     image_copy_capture_v1.h
+    image_capture_source_v1.h
     screenedge_v1.h
     seat.h
     securitycontext_v1.h

@@ -46,7 +46,10 @@ public:
     void addClientBufferDamage(const QRect & damage) override {}
 
 private Q_SLOTS:
-    void handleOutputChange(const QRegion &damageLogical);
+    void handleOutputDamage(const QRegion &damageLogical);
+    void handleOutputSizeChange();
+    void handleOutputTransformChange();
+    void handleOutputDestroyed();
     void handleCursorChanged(Cursor* cursor);
     void handleCursorMoved(Cursor *cursor, const QPointF &position);
     void handleCursorHidden();
@@ -73,8 +76,8 @@ private:
     bool m_cursorHasChanged;
 
     /**
-     * @brief The region of the Output that has changed since the last "ready" event
-     *        was fired.
+     * @brief The cumulative region of the Output that has changed since the
+     *        last "ready" event was fired.
      *
      * This region is expressed in physical (scaled) coordinates.
      *
@@ -107,6 +110,11 @@ private:
      * Currently only one buffer format, the most straightforward one, is supported.
      */
     void advertiseBufferConstraints();
+
+    /**
+     * @brief Consider the whole frame's area to be damaged for the next captured frame.
+     */
+    void damageWholeFrame();
 
     /**
      * @brief Render the contents of the output into the frame's buffer.
@@ -153,10 +161,12 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
     , m_overlayCursor(overlayCursor)
 {
     // All output contents are damaged at start
-    m_frameDamage += QRect(QPoint(0,0), output->pixelSize());
-    m_cursorHasChanged = true;
+    damageWholeFrame();
 
-    connect(output, &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputChange);
+    connect(output, &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputDamage);
+    connect(output, &Output::geometryChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
+    connect(output, &Output::scaleChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
+    connect(output, &Output::destroyed, this, &ImageCopyCaptureSessionImpl::handleOutputDestroyed);
 
     if (overlayCursor) {
         auto* cursors = Cursors::self();
@@ -168,7 +178,16 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
     advertiseBufferConstraints();
 }
 
-void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogical)
+void ImageCopyCaptureSessionImpl::damageWholeFrame()
+{
+    Q_ASSERT(m_output);
+    m_frameDamage.setRects(QSpan<const QRect>());   // clear
+    m_frameDamage += QRect(QPoint(0,0), m_output->pixelSize());
+    m_cursorHasChanged = true;
+    m_lastCursorBox = QRectF();
+}
+
+void ImageCopyCaptureSessionImpl::handleOutputDamage(const QRegion &damageLogical)
 {
     auto outputScale = m_output->scale();
     for (const auto & rectLogical : damageLogical) {
@@ -177,6 +196,22 @@ void ImageCopyCaptureSessionImpl::handleOutputChange(const QRegion &damageLogica
     }
 
     sendFrameUpdatesIfAny();
+}
+
+void ImageCopyCaptureSessionImpl::handleOutputSizeChange()
+{
+    damageWholeFrame();
+    advertiseBufferConstraints();
+}
+
+void ImageCopyCaptureSessionImpl::handleOutputTransformChange()
+{
+    damageWholeFrame();
+}
+
+void ImageCopyCaptureSessionImpl::handleOutputDestroyed()
+{
+    sendStopped();
 }
 
 void ImageCopyCaptureSessionImpl::handleCursorChanged(Cursor* cursor)
@@ -256,7 +291,7 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     // Finish up with frame meta-information
     clientBuffer->unmap();
     frame.sendTransform(WL_OUTPUT_TRANSFORM_NORMAL); // No transform applied
-    auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
+    auto timestamp = output->renderLoop()->lastPresentationTimestamp();
     frame.sendPresentationTime(timestamp);
 
     return true;
@@ -302,7 +337,8 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     }
 
     // Fail if output has already gone away.
-    if (m_output == nullptr) {
+    Output* output = m_output.get();
+    if (output == nullptr) {
         qDebug() << "Output has gone away while a frame is being captured";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
         return;
@@ -317,7 +353,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // The cursor box may exceed the extents of the output, so it needs
     // to be clipped for reporting it as damage to the client.  We also do
     // the same, defensively, for the other rectangles of m_frameDamage.
-    auto wholeArea = QRect(QPoint(0, 0), m_output->pixelSize());
+    auto wholeArea = QRect(QPoint(0, 0), output->pixelSize());
 
     // Damage old and new locations of cursor
     if (m_cursorHasChanged) {

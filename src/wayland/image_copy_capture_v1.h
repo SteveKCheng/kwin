@@ -22,6 +22,7 @@ class ImageCopyCaptureManagerV1InterfacePrivate;
 class ImageCopyCaptureSessionV1InterfacePrivate;
 class ImageCopyCaptureFrameV1InterfacePrivate;
 class ImageCopyCaptureFrameV1Interface;
+class ImageCopyCaptureSessionV1Interface;
 class ShmClientBuffer;
 
 /**
@@ -42,6 +43,43 @@ struct BufferFormat
     {
         return !operator==(other);
     }
+};
+
+/**
+ * The ImageCopyCaptureManagerV1Interface provides ext_image_copy_capture protocol support.
+ * 
+ * This allows clients to capture screen content directly to client-provided buffers,
+ * which is much more efficient for VNC and similar applications than the PipeWire-based
+ * screencast protocol.
+ * 
+ * The ImageCopyCaptureManagerV1Interface corresponds to the Wayland interface @c ext_image_copy_capture_manager_v1.
+ */
+class KWIN_EXPORT ImageCopyCaptureManagerV1Interface : public QObject
+{
+    Q_OBJECT
+
+public:
+    ~ImageCopyCaptureManagerV1Interface() override;
+
+protected:
+    explicit ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent);
+
+    /**
+     * @brief Instantiate a capture session for the given output with specified options.
+     *
+     * This factory method is called when a client requests to create a session.
+     * The returned session object will be automatically deleted when the 
+     * session is destroyed by the client.
+     *
+     * @param output The output to capture from
+     * @param overlayCursor Whether to overlay cursor onto captured frames
+     * @return Newly instantiated session object or nullptr on failure
+     */
+    virtual ImageCopyCaptureSessionV1Interface *createSession(Output *output, bool overlayCursor) = 0;
+
+private:
+    friend class ImageCopyCaptureManagerV1InterfacePrivate;
+    const std::unique_ptr<ImageCopyCaptureManagerV1InterfacePrivate> d;
 };
 
 /**
@@ -83,76 +121,6 @@ public:
     /**
      * Send buffer size constraint to the client.
      */
-    virtual void sendBufferSize(const QSize &size) = 0;
-
-    /**
-     * Send shared memory format constraint to the client.
-     */
-    virtual void sendShmFormat(uint32_t format) = 0;
-
-    /**
-     * Send done event to indicate all buffer constraints have been sent.
-     */
-    virtual void sendConstraintsDone() = 0;
-
-    /**
-     * Send stopped event to indicate the session is no longer available.
-     */
-    virtual void sendStopped() = 0;
-};
-
-/**
- * The ImageCopyCaptureManagerV1Interface provides ext_image_copy_capture protocol support.
- * 
- * This allows clients to capture screen content directly to client-provided buffers,
- * which is much more efficient for VNC and similar applications than the PipeWire-based
- * screencast protocol.
- * 
- * The ImageCopyCaptureManagerV1Interface corresponds to the Wayland interface @c ext_image_copy_capture_manager_v1.
- */
-class KWIN_EXPORT ImageCopyCaptureManagerV1Interface : public QObject
-{
-    Q_OBJECT
-
-public:
-    ~ImageCopyCaptureManagerV1Interface() override;
-
-protected:
-    explicit ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent);
-
-    /**
-     * @brief Instantiate a capture session for the given output with specified options.
-     *
-     * This factory method is called when a client requests to create a session.
-     * The returned session object will be automatically deleted when the 
-     * session is destroyed by the client.
-     *
-     * @param output The output to capture from
-     * @param overlayCursor Whether to overlay cursor onto captured frames
-     * @return Newly instantiated session object or nullptr on failure
-     */
-    virtual ImageCopyCaptureSessionV1Interface *createSession(Output *output, bool overlayCursor) = 0;
-
-private:
-    friend class ImageCopyCaptureManagerV1InterfacePrivate;
-    const std::unique_ptr<ImageCopyCaptureManagerV1InterfacePrivate> d;
-};
-
-/**
- * The ImageCopyCaptureSessionV1InterfaceBase represents an active capture session with protocol bindings.
- * 
- * This is a concrete class that wraps the Wayland protocol details.
- */
-class KWIN_EXPORT ImageCopyCaptureSessionV1InterfaceBase final : public QObject
-{
-    Q_OBJECT
-
-public:
-    ~ImageCopyCaptureSessionV1InterfaceBase() override;
-
-    /**
-     * Send buffer size constraint to the client.
-     */
     void sendBufferSize(const QSize &size);
 
     /**
@@ -181,21 +149,16 @@ public:
     void sendStopped();
 
 public:
-    explicit ImageCopyCaptureSessionV1InterfaceBase(ImageCopyCaptureManagerV1Interface *manager,
-                                                   ImageCopyCaptureSessionV1Interface *implementation);
+    explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
 
     friend class ImageCopyCaptureSessionV1InterfacePrivate;
     friend class ImageCopyCaptureManagerV1InterfacePrivate; // for construction
     friend class ImageCopyCaptureFrameV1InterfacePrivate; // for frame access
-    
-    ImageCopyCaptureSessionV1Interface* getImplementation() const { return m_implementation; }
-    
+
 public: // Make d accessible for private implementations
     const std::unique_ptr<ImageCopyCaptureSessionV1InterfacePrivate> d;
-    
-private:
-    ImageCopyCaptureSessionV1Interface* m_implementation;
 };
+
 
 /**
  * The ImageCopyCaptureFrameV1Interface represents a single frame capture request.
@@ -249,7 +212,7 @@ public:
     void sendFailed(uint32_t reason);
 
 public:
-    explicit ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1InterfaceBase *session);
+    explicit ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session);
 
     friend class ImageCopyCaptureFrameV1InterfacePrivate;
     friend class ImageCopyCaptureSessionV1InterfacePrivate; // for construction

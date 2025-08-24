@@ -43,46 +43,7 @@ protected:
     void ext_image_copy_capture_manager_v1_create_session(Resource *resource,
                                                          uint32_t session_id,
                                                          struct ::wl_resource *source_resource,
-                                                         uint32_t options) override
-    {
-        // Extract the ImageCaptureSourceV1Interface from the wl_resource
-        ImageCaptureSourceV1Interface *sourceInterface = ImageCaptureSourceV1Interface::get(source_resource);
-        if (!sourceInterface) {
-            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "invalid image capture source");
-            return;
-        }
-
-        // For now, we only support output sources
-        if (sourceInterface->sourceType() != ImageCaptureSourceType::Output) {
-            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "unsupported source type");
-            return;
-        }
-
-        Output *output = sourceInterface->output();
-        if (!output) {
-            wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "source has no valid output");
-            return;
-        }
-
-        wl_resource *sessionResource = wl_resource_create(resource->client(), &ext_image_copy_capture_session_v1_interface, resource->version(), session_id);
-        if (!sessionResource) {
-            wl_resource_post_no_memory(resource->handle);
-            return;
-        }
-
-        bool overlayCursor = (options & QtWaylandServer::ext_image_copy_capture_manager_v1::options_paint_cursors) != 0;
-        
-        auto* session = m_parent->createSession(output, overlayCursor);
-        if (!session) {
-            wl_resource_destroy(sessionResource);
-            return;
-        }
-
-        session->d->init(sessionResource);
-        
-        // Send initial buffer constraints
-        session->prepareFrame();
-    }
+                                                         uint32_t options) override;
 
     void ext_image_copy_capture_manager_v1_create_pointer_cursor_session(Resource *resource,
                                                                         uint32_t session_id,
@@ -98,7 +59,7 @@ protected:
 class ImageCopyCaptureSessionV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_session_v1
 {
 public:
-    ImageCopyCaptureSessionV1InterfacePrivate(ImageCopyCaptureSessionV1InterfaceBase *q)
+    ImageCopyCaptureSessionV1InterfacePrivate(ImageCopyCaptureSessionV1Interface *q)
         : m_parent(q)
     {
     }
@@ -109,7 +70,7 @@ private:
     /**
      * @brief Pointer to the owner of this private pimpl.
      */
-    ImageCopyCaptureSessionV1InterfaceBase * const m_parent;
+    ImageCopyCaptureSessionV1Interface * const m_parent;
 
 protected:
     void ext_image_copy_capture_session_v1_destroy_resource(Resource *resource) override
@@ -122,30 +83,14 @@ protected:
         wl_resource_destroy(resource->handle);
     }
 
-    void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override
-    {
-        if (m_currentFrame) {
-            wl_resource_post_error(resource->handle, error_duplicate_frame, "frame already exists for this session");
-            return;
-        }
-
-        wl_resource *frameResource = wl_resource_create(resource->client(), &ext_image_copy_capture_frame_v1_interface, resource->version(), frame_id);
-        if (!frameResource) {
-            wl_resource_post_no_memory(resource->handle);
-            return;
-        }
-
-        auto* frame = new ImageCopyCaptureFrameV1Interface(m_parent);
-        frame->d->init(frameResource);
-        m_currentFrame = frame;
-    }
+    void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override;
 };
 
 class ImageCopyCaptureFrameV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_frame_v1
 {
 public:
     ImageCopyCaptureFrameV1InterfacePrivate(ImageCopyCaptureFrameV1Interface *q,
-                                           ImageCopyCaptureSessionV1InterfaceBase *session)
+                                           ImageCopyCaptureSessionV1Interface *session)
         : m_parent(q)
         , m_session(session)
     {
@@ -163,7 +108,7 @@ private:
     /**
      * @brief Pointer to the session that owns this frame.
      */
-    ImageCopyCaptureSessionV1InterfaceBase * const m_session;
+    ImageCopyCaptureSessionV1Interface * const m_session;
 
 protected:
     void ext_image_copy_capture_frame_v1_destroy_resource(Resource *resource) override
@@ -240,6 +185,47 @@ protected:
 // Implementation of ImageCopyCaptureManagerV1Interface
 //
 
+void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v1_create_session(Resource *resource, uint32_t session_id, wl_resource *source_resource, uint32_t options)
+{
+    // Extract the ImageCaptureSourceV1Interface from the wl_resource
+    ImageCaptureSourceV1Interface *sourceInterface = ImageCaptureSourceV1Interface::get(source_resource);
+    if (!sourceInterface) {
+        wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "invalid image capture source");
+        return;
+    }
+
+    // For now, we only support output sources
+    if (sourceInterface->sourceType() != ImageCaptureSourceType::Output) {
+        wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "unsupported source type");
+        return;
+    }
+
+    Output *output = sourceInterface->output();
+    if (!output) {
+        wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "source has no valid output");
+        return;
+    }
+
+    wl_resource *sessionResource = wl_resource_create(resource->client(), &ext_image_copy_capture_session_v1_interface, resource->version(), session_id);
+    if (!sessionResource) {
+        wl_resource_post_no_memory(resource->handle);
+        return;
+    }
+
+    bool overlayCursor = (options & QtWaylandServer::ext_image_copy_capture_manager_v1::options_paint_cursors) != 0;
+
+    auto *session = m_parent->createSession(output, overlayCursor);
+    if (!session) {
+        wl_resource_destroy(sessionResource);
+        return;
+    }
+
+    session->d->init(sessionResource);
+
+    // Send initial buffer constraints
+    session->prepareFrame();
+}
+
 ImageCopyCaptureManagerV1Interface::ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent)
     : QObject(parent)
     , d(std::make_unique<ImageCopyCaptureManagerV1InterfacePrivate>(this, display))
@@ -249,43 +235,59 @@ ImageCopyCaptureManagerV1Interface::ImageCopyCaptureManagerV1Interface(Display *
 ImageCopyCaptureManagerV1Interface::~ImageCopyCaptureManagerV1Interface() = default;
 
 //
-// Implementation of ImageCopyCaptureSessionV1InterfaceBase
+// Implementation of ImageCopyCaptureSessionV1Interface
 //
 
-ImageCopyCaptureSessionV1InterfaceBase::ImageCopyCaptureSessionV1InterfaceBase(ImageCopyCaptureManagerV1Interface *manager)
+void ImageCopyCaptureSessionV1InterfacePrivate::ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id)
+{
+    if (m_currentFrame) {
+        wl_resource_post_error(resource->handle, error_duplicate_frame, "frame already exists for this session");
+        return;
+    }
+
+    wl_resource *frameResource = wl_resource_create(resource->client(), &ext_image_copy_capture_frame_v1_interface, resource->version(), frame_id);
+    if (!frameResource) {
+        wl_resource_post_no_memory(resource->handle);
+        return;
+    }
+
+    auto *frame = new ImageCopyCaptureFrameV1Interface(m_parent);
+    frame->d->init(frameResource);
+    m_currentFrame = frame;
+}
+
+ImageCopyCaptureSessionV1Interface::ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager)
     : QObject(manager)
     , d(std::make_unique<ImageCopyCaptureSessionV1InterfacePrivate>(this))
 {
 }
 
-ImageCopyCaptureSessionV1InterfaceBase::~ImageCopyCaptureSessionV1InterfaceBase() = default;
-
-void ImageCopyCaptureSessionV1InterfaceBase::sendBufferSize(const QSize &size)
+void ImageCopyCaptureSessionV1Interface::sendBufferSize(const QSize &size)
 {
     d->send_buffer_size(size.width(), size.height());
 }
 
-void ImageCopyCaptureSessionV1InterfaceBase::sendShmFormat(uint32_t format)
+void ImageCopyCaptureSessionV1Interface::sendShmFormat(uint32_t format)
 {
     d->send_shm_format(format);
 }
 
-void ImageCopyCaptureSessionV1InterfaceBase::sendDmaBufDevice(const QByteArray &device)
+void ImageCopyCaptureSessionV1Interface::sendDmaBufDevice(const QByteArray &device)
 {
     d->send_dmabuf_device(device);
 }
 
-void ImageCopyCaptureSessionV1InterfaceBase::sendDmaBufFormat(uint32_t format, const QByteArray &modifiers)
+void ImageCopyCaptureSessionV1Interface::sendDmaBufFormat(uint32_t format, const QByteArray &modifiers)
 {
     d->send_dmabuf_format(format, modifiers);
 }
 
-void ImageCopyCaptureSessionV1InterfaceBase::sendConstraintsDone()
+void ImageCopyCaptureSessionV1Interface::sendConstraintsDone()
 {
     d->send_done();
 }
 
-void ImageCopyCaptureSessionV1InterfaceBase::sendStopped()
+void ImageCopyCaptureSessionV1Interface::sendStopped()
 {
     d->send_stopped();
 }
@@ -294,7 +296,7 @@ void ImageCopyCaptureSessionV1InterfaceBase::sendStopped()
 // Implementation of ImageCopyCaptureFrameV1Interface
 //
 
-ImageCopyCaptureFrameV1Interface::ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1InterfaceBase *session)
+ImageCopyCaptureFrameV1Interface::ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session)
     : QObject(session)
     , d(std::make_unique<ImageCopyCaptureFrameV1InterfacePrivate>(this, session))
 {

@@ -384,12 +384,12 @@ public:
         m_outputTracking->captureFrame(frame, waitForDamage, m_overlayCursor);
     }
 
-    Output* getOutput() const override
+    Output* getOutput() const
     {
         return m_output.get();
     }
 
-    bool shouldOverlayCursor() const override
+    bool shouldOverlayCursor() const
     {
         return m_overlayCursor;
     }

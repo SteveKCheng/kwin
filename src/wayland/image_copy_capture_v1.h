@@ -91,16 +91,6 @@ public:
     virtual void captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool waitForDamage) = 0;
 
     /**
-     * @brief Get the target display output to capture.
-     */
-    virtual Output* getOutput() const = 0;
-
-    /**
-     * @brief Whether the client requested the (mouse) cursor be overlaid (rendered) onto the frame.
-     */
-    virtual bool shouldOverlayCursor() const = 0;
-
-    /**
      * Send buffer size constraint to the client.
      */
     void sendBufferSize(const QSize &size);

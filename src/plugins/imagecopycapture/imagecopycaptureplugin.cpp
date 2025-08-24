@@ -96,13 +96,10 @@ private:
     /**
      * @brief Render the contents of the output into the frame's buffer.
      *
-     * All of the frame will be rendered; this method does not clip the output
-     * to (the bounding box of) m_acccumulatedDamage.
-     *
-     * This method also updates m_lastCursorBox as part of rendering the
-     * cursor as part of the frame.
+     * This method marks the frame as "ready" after rendering into the buffer.
+     * So, all "damage" events must be sent out for the frame before calling this method.
      */
-    void renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect);
+    void renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect);
 
     /**
      * @brief Update internal tracking variables after an update has been
@@ -131,7 +128,7 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(ImageCopyCaptureManager
     , m_output(output)
     , m_overlayCursor(overlayCursor)
 {
-    connect(m_output.get(), &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputChange);
+    connect(output, &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputChange);
 
     if (overlayCursor) {
         auto* cursors = Cursors::self();
@@ -169,7 +166,7 @@ void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPoint
     sendUpdatedContents();
 }
 
-void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRectF cursorRect)
+void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorRect)
 {
     Output* output = m_output.get();
     Q_ASSERT(output != nullptr);
@@ -229,9 +226,6 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     // Send metadata events
     frame.sendTransform(WL_OUTPUT_TRANSFORM_NORMAL); // No transform applied
     
-    // Send damage - for the new protocol we always send full damage for simplicity
-    frame.sendDamage(QRect(0, 0, bufferFormat.bufferSize.width(), bufferFormat.bufferSize.height()));
-
     // Send presentation time using the output's presentation timestamp
     auto timestamp = m_output->renderLoop()->lastPresentationTimestamp();
     frame.sendPresentationTime(timestamp);
@@ -284,6 +278,14 @@ void ImageCopyCaptureSessionImpl::sendUpdatedContents()
     if (cursorRect.isValid()) {
         newCursorBox = cursorRect.toAlignedRect();
         m_accumulatedDamage += newCursorBox;
+    }
+
+    // Send damage event(s).
+    if (m_accumulatedDamage.rectCount() <= 8) {
+        for (const QRect & rect : m_accumulatedDamage)
+            frame->sendDamage(rect);
+    } else {
+        frame->sendDamage(m_accumulatedDamage.boundingRect());
     }
 
     // Render the full frame (similar to screencopy behavior)

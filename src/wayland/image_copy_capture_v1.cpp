@@ -341,3 +341,5 @@ void ImageCopyCaptureFrameV1Interface::sendFailed(uint32_t reason)
 }
 
 } // namespace KWin
+
+#include "moc_image_copy_capture_v1.cpp"

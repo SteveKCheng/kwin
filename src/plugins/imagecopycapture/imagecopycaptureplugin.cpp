@@ -93,6 +93,11 @@ private:
      */
     QRect m_lastCursorBox;
 
+    /**
+     * @brief Send events to advertise the supported buffer formats to the client.
+     *
+     * Currently only one buffer format, the most straightforward one, is supported.
+     */
     void advertiseBufferConstraints();
 
     /**

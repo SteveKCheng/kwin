@@ -26,26 +26,6 @@ class ImageCopyCaptureSessionV1Interface;
 class ShmClientBuffer;
 
 /**
- * @brief Grouping of the parameters for buffer constraints.
- */
-struct BufferFormat
-{
-    uint32_t pixelFormat;
-    QSize bufferSize;
-    int rowStride;
-
-    bool operator==(const BufferFormat &other) const
-    {
-        return pixelFormat == other.pixelFormat && bufferSize == other.bufferSize && rowStride == other.rowStride;
-    }
-
-    bool operator!=(const BufferFormat &other) const
-    {
-        return !operator==(other);
-    }
-};
-
-/**
  * The ImageCopyCaptureManagerV1Interface provides ext_image_copy_capture protocol support.
  * 
  * This allows clients to capture screen content directly to client-provided buffers,
@@ -90,6 +70,8 @@ class KWIN_EXPORT ImageCopyCaptureSessionV1Interface : public QObject
     Q_OBJECT
 
 public:
+    ~ImageCopyCaptureSessionV1Interface() override;
+
     /**
      * @brief Prepare to capture frames in this session.
      *
@@ -147,6 +129,26 @@ public:
      * Send stopped event to indicate the session is no longer available.
      */
     void sendStopped();
+
+    /**
+     * @brief Grouping of the parameters for buffer constraints.
+     */
+    struct BufferFormat
+    {
+        uint32_t pixelFormat;
+        QSize bufferSize;
+        int rowStride;
+
+        bool operator==(const BufferFormat &other) const
+        {
+            return pixelFormat == other.pixelFormat && bufferSize == other.bufferSize && rowStride == other.rowStride;
+        }
+
+        bool operator!=(const BufferFormat &other) const
+        {
+            return !operator==(other);
+        }
+    };
 
 public:
     explicit ImageCopyCaptureSessionV1Interface(ImageCopyCaptureManagerV1Interface *manager);
@@ -206,10 +208,18 @@ public:
      */
     void sendReady();
 
+    enum class FailureReason : uint32_t
+    {
+        unknown = 0,
+        buffer_constraints = 1,
+        stopped = 2,
+    };
+
+
     /**
      * Send failed event to indicate capture failure.
      */
-    void sendFailed(uint32_t reason);
+    void sendFailed(FailureReason reason);
 
 public:
     explicit ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session);

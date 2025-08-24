@@ -46,7 +46,7 @@ public:
     /**
      * @brief Implementation of ImageCopyCaptureSessionV1Interface::prepareFrame for this output.
      */
-    void prepareFrame(ImageCopyCaptureSessionV1InterfaceBase* session);
+    void prepareFrame(ImageCopyCaptureSessionV1Interface* session);
 
     /**
      * @brief Implementation of ImageCopyCaptureSessionV1Interface::captureFrame for this output.
@@ -131,7 +131,7 @@ private:
      *
      * This method is factored out for validating the client's buffer's parameters.
      */
-    ImageCopyCaptureSessionV1InterfaceBase::BufferFormat getBufferFormat() const;
+    ImageCopyCaptureSessionV1Interface::BufferFormat getBufferFormat() const;
 
     /**
      * @brief Get the rectangular area where the (mouse) cursor is to be painted on the framebuffer.
@@ -201,34 +201,34 @@ void OutputTracking::renderFrame(ImageCopyCaptureFrameV1Interface & frame, QRect
     // Get the compositor texture for the output
     auto [texture, color] = Compositor::self()->textureForOutput(output);
     if (!texture) {
-        frame.sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_unknown);
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return;
     }
 
     // Map the client buffer to get direct access to its memory
     auto* clientBuffer = frame.takeShmClientBuffer();
     if (!clientBuffer) {
-        frame.sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_buffer_constraints);
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return;
     }
 
     // Validate buffer parameters.
     const ShmAttributes* bufferAttributes = clientBuffer->shmAttributes();
-    auto bufferFormat = ImageCopyCaptureSessionV1InterfaceBase::BufferFormat{
+    auto bufferFormat = ImageCopyCaptureSessionV1Interface::BufferFormat{
         drmFormatToShmFormat(bufferAttributes->format),
         bufferAttributes->size,
         bufferAttributes->stride,
     };
     if (bufferFormat != getBufferFormat()) {
         qWarning() << "Buffer passed for image copy capture has the wrong format; failing the request";
-        frame.sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_buffer_constraints);
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return;
     }
 
     auto mapping = clientBuffer->map(GraphicsBuffer::Write);
     if (!mapping.data) {
         clientBuffer->unmap();
-        frame.sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_unknown);
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return;
     }
 
@@ -320,7 +320,7 @@ void OutputTracking::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool 
     // Fail if output has already gone away.
     if (getOutput() == nullptr) {
         qWarning() << "output has gone away";
-        frame->sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_stopped);
+        frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
         return;
     }
 
@@ -335,7 +335,7 @@ void OutputTracking::captureFrame(ImageCopyCaptureFrameV1Interface* frame, bool 
     }
 }
 
-void OutputTracking::prepareFrame(ImageCopyCaptureSessionV1InterfaceBase* session)
+void OutputTracking::prepareFrame(ImageCopyCaptureSessionV1Interface* session)
 {
     // Send buffer constraints
     auto bufferFormat = getBufferFormat();
@@ -344,7 +344,7 @@ void OutputTracking::prepareFrame(ImageCopyCaptureSessionV1InterfaceBase* sessio
     session->sendConstraintsDone();
 }
 
-ImageCopyCaptureSessionV1InterfaceBase::BufferFormat OutputTracking::getBufferFormat() const
+ImageCopyCaptureSessionV1Interface::BufferFormat OutputTracking::getBufferFormat() const
 {
     Q_ASSERT(m_output != nullptr);
 
@@ -377,7 +377,7 @@ public:
     {
         if (!m_outputTracking) {
             // Output may have gone away
-            frame->sendFailed(QtWaylandServer::ext_image_copy_capture_frame_v1::failure_reason_stopped);
+            frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
             return;
         }
 

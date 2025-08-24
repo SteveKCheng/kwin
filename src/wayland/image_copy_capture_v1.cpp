@@ -262,6 +262,8 @@ ImageCopyCaptureSessionV1Interface::ImageCopyCaptureSessionV1Interface(ImageCopy
 {
 }
 
+ImageCopyCaptureSessionV1Interface::~ImageCopyCaptureSessionV1Interface() = default;
+
 void ImageCopyCaptureSessionV1Interface::sendBufferSize(const QSize &size)
 {
     d->send_buffer_size(size.width(), size.height());
@@ -335,9 +337,9 @@ void ImageCopyCaptureFrameV1Interface::sendReady()
     d->send_ready();
 }
 
-void ImageCopyCaptureFrameV1Interface::sendFailed(uint32_t reason)
+void ImageCopyCaptureFrameV1Interface::sendFailed(FailureReason reason)
 {
-    d->send_failed(reason);
+    d->send_failed(static_cast<uint>(reason));
 }
 
 } // namespace KWin

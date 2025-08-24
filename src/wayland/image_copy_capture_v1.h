@@ -166,39 +166,49 @@ public:
     ~ImageCopyCaptureFrameV1Interface() override;
 
     /**
-     * @brief Take the shared-memory buffer from the client to copy the frame's contents
+     * @brief Get the shared-memory buffer from the client to copy the frame's contents
      *        into.
      *
      * A pointer to the buffer attached by the client is captured by this object.
-     * A buffer should only be used once per frame, so the pointer
-     * to that buffer is erased from this object once this method is called.
      *
      * The client buffer is guaranteed to be alive until control returns to the Wayland dispatch loop.
-     *
      * This method returns null if there is no registered buffer or the client destroyed it.
+     *
+     * This method must not be called after capturing has finished.
      */
-    ShmClientBuffer* takeShmClientBuffer();
+    ShmClientBuffer* getShmClientBuffer();
 
     /**
      * Send transform information to indicate how the buffer contents are oriented.
+     *
+     * This method must not be called after capturing has finished.
      */
     void sendTransform(uint32_t transform);
 
     /**
      * Send damage information about the region that changed.
+     *
+     * This method must not be called after capturing has finished.
      */
     void sendDamage(const QRect &rect);
 
     /**
      * Send presentation time of the captured frame.
+     *
+     * This method must not be called after capturing has finished.
      */
     void sendPresentationTime(std::chrono::nanoseconds timestamp);
 
     /**
      * Send ready event to indicate successful capture.
+     *
+     * This method is considered to finish the capturing.
      */
     void sendReady();
 
+    /**
+     * The reason for failing to capture a frame.
+     */
     enum class FailureReason : uint32_t
     {
         unknown = 0,
@@ -208,6 +218,8 @@ public:
 
     /**
      * Send failed event to indicate capture failure.
+     *
+     * This method is considered to finish the capturing (unsuccessfully).
      */
     void sendFailed(FailureReason reason);
 

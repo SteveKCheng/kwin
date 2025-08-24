@@ -191,7 +191,7 @@ void ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     }
 
     // Map the client buffer to get direct access to its memory
-    auto* clientBuffer = frame.takeShmClientBuffer();
+    auto* clientBuffer = frame.getShmClientBuffer();
     if (!clientBuffer) {
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return;

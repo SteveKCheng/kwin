@@ -321,11 +321,10 @@ ImageCopyCaptureFrameV1Interface::ImageCopyCaptureFrameV1Interface(ImageCopyCapt
 
 ImageCopyCaptureFrameV1Interface::~ImageCopyCaptureFrameV1Interface() = default;
 
-ShmClientBuffer* ImageCopyCaptureFrameV1Interface::takeShmClientBuffer()
+ShmClientBuffer* ImageCopyCaptureFrameV1Interface::getShmClientBuffer()
 {
-    auto* p = d->m_shmClientBuffer.get();
-    d->m_shmClientBuffer = nullptr;
-    return p;
+    Q_ASSERT(!d->m_captureDone);
+    return d->m_shmClientBuffer.get();
 }
 
 void ImageCopyCaptureFrameV1Interface::sendTransform(uint32_t transform)

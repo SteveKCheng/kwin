@@ -143,8 +143,20 @@ private:
      *
      * Called as part of #sendCapturedFrame.
      *
-     * @return True if rendering was successful; false if the frame has been marked
-     *         has failed.
+     * @param frame    The frame to render into.  Rendering will fail
+     *                 if the frame does not have an attached buffer
+     *                 or it is not of the correct format.
+     * @param clipBox  The rectangle to re-paint in the frame's buffer.
+     *                 Areas outside will remain unchanged.
+     *                 This box will naturally be clipped against the Output's area.
+     * @param cursorBox  The rectangle containing the cursor to overlay
+     *                   onto the Output's contents.  The cursor image will
+     *                   also be implicitly clipped against the Output's area
+     *                   and also @a clipBox.
+     *
+     * @return True if rendering was successful. False if the frame has been marked
+     *         has failed, or an update should not be sent out because
+     *         there is no damage within the Output's area.
      */
     bool renderFrame(ImageCopyCaptureFrameV1Interface & frame,
                      const QRect & clipBox,
@@ -269,21 +281,25 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     Output* output = m_output.get();
     Q_ASSERT(output != nullptr);
 
-    // Get the compositor texture for the output
-    auto [texture, color] = Compositor::self()->textureForOutput(output);
-    if (!texture) {
-        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
+    auto outputSize = output->pixelSize();
+
+    // Ensure pointer arithmetic below does not go out of bounds
+    auto inBoundsClipBox = clipBox.intersected(QRect(QPoint(), outputSize));
+
+    // An empty inBoundsClipBox can happen if the cursor is entirely off the screen (Output).
+    // sendFrameUpdatesIfAny relies on this method to clip to the Output's area.
+    // In this case, we should not send an update at all and keep waiting for additional
+    // damage.  We return false so sendFrameUpdatesIfAny does not mark the frame
+    // as ready, although this case is clearly not a failure.
+    if (inBoundsClipBox.isEmpty()) {
         return false;
     }
 
-    // Map the client buffer to get direct access to its memory
     auto* clientBuffer = frame.getShmClientBuffer();
     if (!clientBuffer) {
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return false;
     }
-
-    auto outputSize = output->pixelSize();
 
     // Validate buffer parameters.
     // N.B. bufferAttributes->format is always in the DRM format even for ShmClientBuffer.
@@ -299,15 +315,20 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
         return false;
     }
 
+    // Get the compositor texture for the output
+    auto [texture, color] = Compositor::self()->textureForOutput(output);
+    if (!texture) {
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
+        return false;
+    }
+
+    // Map in the client buffer to start compositing
     auto mapping = clientBuffer->map(GraphicsBuffer::Write);
     if (!mapping.data) {
         clientBuffer->unmap();
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return false;
     }
-
-    // Ensure pointer arithmetic below does not go out of bounds
-    auto inBoundsClipBox = clipBox.intersected(QRect(QPoint(), outputSize));
 
     // Set up targetImage to include only the clipped area
     auto imageStart = static_cast<uchar*>(mapping.data)
@@ -329,9 +350,18 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     // Paint cursor (if requested)
     if (cursorBox.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
+
         if (!cursorImage.isNull()) {
+            // cursorBox in the "local" coordinates of inBoundsClipBox.
+            auto cursorBoxLocal = cursorBox.translated(-inBoundsClipBox.topLeft().toPointF());
+
             QPainter painter(&targetImage);
-            painter.drawImage(cursorBox.translated(-inBoundsClipBox.topLeft()), cursorImage);
+
+            // Clip against cursorBoxLocal in case the cursor image has a different size than
+            // what the caller calculated as damage. (Defensive programming, should not happen.)
+            painter.setClipRect(cursorBoxLocal.toAlignedRect());
+
+            painter.drawImage(cursorBoxLocal.topLeft(), cursorImage);
         }
     }
 
@@ -390,17 +420,15 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 
     QRectF newCursorBox = getCursorBox();
 
-    // Damage old and new locations of cursor.
+    // Damage the old and new locations of the cursor.
     //
     // If rendering fails below, we still add to m_frameDamage, which only
     // incurs a small inefficiency and does not cause incorrect behavior.
+    //
+    // Note the rectangles may be invalid which cause no damage to be added.
     if (m_cursorHasChanged) {
-        if (m_lastCursorBox.isValid()) {
-            m_frameDamage += m_lastCursorBox.toAlignedRect();
-        }
-        if (newCursorBox.isValid()) {
-            m_frameDamage += newCursorBox.toAlignedRect();
-        }
+        m_frameDamage += m_lastCursorBox.toAlignedRect();
+        m_frameDamage += newCursorBox.toAlignedRect();
     }
 
     auto frameDamageBounds = m_frameDamage.boundingRect();

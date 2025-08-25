@@ -32,7 +32,7 @@ namespace KWin
 namespace
 {
 
-class ImageCopyCaptureSessionImpl : public ImageCopyCaptureSessionV1Interface
+class ImageCopyCaptureSessionImpl final : public ImageCopyCaptureSessionV1Interface
 {
     Q_OBJECT
 

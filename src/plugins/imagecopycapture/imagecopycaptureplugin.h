@@ -13,7 +13,7 @@ namespace KWin
 class ImageCopyCaptureManagerV1Interface;
 class OutputImageCaptureSourceManagerV1Interface;
 
-class ImageCopyCapturePlugin : public Plugin
+class ImageCopyCapturePlugin final : public Plugin
 {
     Q_OBJECT
 

@@ -67,7 +67,7 @@ private:
  * 
  * This manages the creation of image capture source objects for wl_output objects.
  */
-class KWIN_EXPORT OutputImageCaptureSourceManagerV1Interface : public QObject
+class KWIN_EXPORT OutputImageCaptureSourceManagerV1Interface final : public QObject
 {
     Q_OBJECT
 

@@ -43,7 +43,7 @@ public:
                                 bool overlayCursor);
 protected:
     void captureFrame() override;
-    void addClientBufferDamage(const QRect & damage) override {}
+    void addClientBufferDamage(const QRect & damage) override;
 
 private Q_SLOTS:
     void handleOutputDamage(const QRegion &damageLogical);
@@ -76,6 +76,16 @@ private:
     bool m_cursorHasChanged;
 
     /**
+     * @brief Bounding rectangle for the region of the client's buffer that needs
+     *        to be re-painted for the next captured frame.
+     *
+     * Although the client can enumerate the rectangles of the region, only
+     * the bounding rectangle is tracked by this implementation for efficiency.
+     * Rendering a texture for individual rectangles may be slow.
+     */
+    QRect m_bufferDamage;
+
+    /**
      * @brief The cumulative region of the Output that has changed since the
      *        last "ready" event was fired.
      *
@@ -88,6 +98,16 @@ private:
      * sent out will contain everything.
      */
     QRegion m_frameDamage;
+
+    /**
+     * @brief Bounding rectangle for the region of the client's buffer that needs
+     *        to be re-painted for the next captured frame.
+     *
+     * Although the client can enumerate the rectangles of the region, only
+     * the bounding rectangle is tracked by this implementation for efficiency.
+     * Rendering a texture for individual rectangles may be slow.
+     */
+    QRect m_bufferDamage;
 
     /**
      * @brief The position and extents of the cursor when
@@ -183,6 +203,7 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource* resource,
 void ImageCopyCaptureSessionImpl::damageWholeFrame()
 {
     Q_ASSERT(m_output);
+
     m_frameDamage.setRects(QSpan<const QRect>());   // clear
     m_frameDamage += QRect(QPoint(), m_output->pixelSize());
     m_cursorHasChanged = true;
@@ -191,6 +212,8 @@ void ImageCopyCaptureSessionImpl::damageWholeFrame()
 
 void ImageCopyCaptureSessionImpl::clearDamage(const QRectF &cursorBox)
 {
+    m_bufferDamage = QRect();
+
     m_frameDamage.setRects(QSpan<const QRect>());   // clear
     m_cursorHasChanged = false;
     m_lastCursorBox = cursorBox;
@@ -378,6 +401,11 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     frame->sendReady();
 
     clearDamage(newCursorBox);
+}
+
+void ImageCopyCaptureSessionImpl::addClientBufferDamage(const QRect &damage)
+{
+    m_bufferDamage |= damage;
 }
 
 void ImageCopyCaptureSessionImpl::advertiseBufferConstraints()

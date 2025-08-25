@@ -376,6 +376,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // Skip if the client destroyed the frame
     auto* frame = getCurrentFrame();
     if (frame == nullptr) {
+        m_bufferDamage = QRect();   // client will refresh on new frame
         return;
     }
 

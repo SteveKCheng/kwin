@@ -24,10 +24,11 @@
 #include "cursor.h"
 #include "main.h"
 
-#include "../screencast/screencastutils.h"
-
 namespace KWin
 {
+
+// Defined in rendertexture.cpp
+bool renderTextureToImage(GLTexture& texture, QImage& target, const QPoint &topLeft, bool &isInverted);
 
 namespace
 {
@@ -100,16 +101,6 @@ private:
     QRegion m_frameDamage;
 
     /**
-     * @brief Bounding rectangle for the region of the client's buffer that needs
-     *        to be re-painted for the next captured frame.
-     *
-     * Although the client can enumerate the rectangles of the region, only
-     * the bounding rectangle is tracked by this implementation for efficiency.
-     * Rendering a texture for individual rectangles may be slow.
-     */
-    QRect m_bufferDamage;
-
-    /**
      * @brief The position and extents of the cursor when
      *        it was rendered last and sent to the client.
      *
@@ -155,7 +146,9 @@ private:
      * @return True if rendering was successful; false if the frame has been marked
      *         has failed.
      */
-    bool renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorBox);
+    bool renderFrame(ImageCopyCaptureFrameV1Interface & frame,
+                     const QRect & clipBox,
+                     const QRectF & cursorBox);
 
     /**
      * @brief Send to the client the contents of the current output, if there
@@ -264,7 +257,9 @@ void ImageCopyCaptureSessionImpl::handleCursorMoved(Cursor *cursor, const QPoint
     sendFrameUpdatesIfAny();
 }
 
-bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame, const QRectF & cursorBox)
+bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface & frame,
+                                              const QRect & clipBox,
+                                              const QRectF & cursorBox)
 {
     Output* output = m_output.get();
     Q_ASSERT(output != nullptr);
@@ -283,14 +278,17 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
         return false;
     }
 
+    auto outputSize = output->pixelSize();
+
     // Validate buffer parameters.
     // N.B. bufferAttributes->format is always in the DRM format even for ShmClientBuffer.
     //      DRM_FORMAT_ARGB8888 is the equivalent of WL_SHM_FORMAT_ARGB8888.
     //      See src/wayland/shmclientbuffer.cpp.
     const ShmAttributes* bufferAttributes = clientBuffer->shmAttributes();
-    if (bufferAttributes->format != DRM_FORMAT_ARGB8888 ||
-        bufferAttributes->size != output->pixelSize() ||
-        bufferAttributes->stride != output->pixelSize().width() * 4) {
+    if (!(bufferAttributes->format == DRM_FORMAT_ARGB8888 &&
+          bufferAttributes->size == outputSize &&
+          (bufferAttributes->stride % 4) == 0 &&
+          (bufferAttributes->stride / 4) >= outputSize.width())) {
         qWarning() << "Buffer passed for image copy capture has the wrong format; failing the request";
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return false;
@@ -303,26 +301,39 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
         return false;
     }
 
-    QImage frameImage{static_cast<uchar*>(mapping.data),
-                      bufferAttributes->size.width(),
-                      bufferAttributes->size.height(),
-                      mapping.stride,
-                      QImage::Format_ARGB32_Premultiplied};
+    // Ensure pointer arithmetic below does not go out of bounds
+    auto inBoundsClipBox = clipBox.intersected(QRect(QPoint(), outputSize));
 
-    grabTexture(texture.get(), &frameImage);
+    // Set up targetImage to include only the clipped area
+    auto imageStart = static_cast<uchar*>(mapping.data)
+                                + inBoundsClipBox.top() * mapping.stride
+                                + inBoundsClipBox.left() * 4;
+    QImage targetImage{imageStart,
+                       inBoundsClipBox.width(),
+                       inBoundsClipBox.height(),
+                       mapping.stride,
+                       QImage::Format_ARGB32_Premultiplied};
+
+    bool isInverted;
+    if (!renderTextureToImage(*texture, targetImage, inBoundsClipBox.topLeft(), isInverted)) {
+        frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
+        return false;
+    }
 
     // Paint cursor (if requested)
     if (cursorBox.isValid()) {
         const QImage cursorImage = kwinApp()->cursorImage().image();
         if (!cursorImage.isNull()) {
-            QPainter painter(&frameImage);
-            painter.drawImage(cursorBox, cursorImage);
+            QPainter painter(&targetImage);
+            painter.drawImage(cursorBox.translated(-inBoundsClipBox.topLeft()), cursorImage);
         }
     }
 
-    // Finish up with frame meta-information
     clientBuffer->unmap();
-    frame.sendTransform(WL_OUTPUT_TRANSFORM_NORMAL); // No transform applied
+
+    frame.sendTransform(isInverted ? WL_OUTPUT_TRANSFORM_FLIPPED
+                                   : WL_OUTPUT_TRANSFORM_NORMAL);
+
     auto timestamp = output->renderLoop()->lastPresentationTimestamp();
     frame.sendPresentationTime(timestamp);
 
@@ -371,7 +382,23 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
 
     QRectF newCursorBox = getCursorBox();
 
-    if (!renderFrame(*frame, newCursorBox)) {
+    // Damage old and new locations of cursor.
+    //
+    // If rendering fails below, we still add to m_frameDamage, which only
+    // incurs a small inefficiency and does not cause incorrect behavior.
+    if (m_cursorHasChanged) {
+        if (m_lastCursorBox.isValid()) {
+            m_frameDamage += m_lastCursorBox.toAlignedRect();
+        }
+        if (newCursorBox.isValid()) {
+            m_frameDamage += newCursorBox.toAlignedRect();
+        }
+    }
+
+    auto frameDamageBounds = m_frameDamage.boundingRect();
+
+    QRect clipBox = m_bufferDamage.united(frameDamageBounds);
+    if (!renderFrame(*frame, clipBox, newCursorBox)) {
         return;
     }
 
@@ -380,22 +407,13 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // the same, defensively, for the other rectangles of m_frameDamage.
     auto wholeArea = QRect(QPoint(), output->pixelSize());
 
-    // Damage old and new locations of cursor
-    if (m_cursorHasChanged) {
-        if (m_lastCursorBox.isValid()) {
-            m_frameDamage += m_lastCursorBox.toAlignedRect().intersected(wholeArea);
-        }
-        if (newCursorBox.isValid()) {
-            m_frameDamage += newCursorBox.toAlignedRect().intersected(wholeArea);
-        }
-    }
-
-    // Send damage event(s).
-    if (m_frameDamage.rectCount() <= 8) {
-        for (const QRect & rect : m_frameDamage)
+    // Send damage event(s).  Do not send too many.
+    if (m_frameDamage.rectCount() <= 32) {
+        for (const QRect & rect : m_frameDamage) {
             frame->sendDamage(rect.intersected(wholeArea));
+        }
     } else {
-        frame->sendDamage(m_frameDamage.boundingRect().intersected(wholeArea));
+        frame->sendDamage(frameDamageBounds.intersected(wholeArea));
     }
 
     frame->sendReady();

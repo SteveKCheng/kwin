@@ -321,6 +321,7 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
 
     bool isInverted;
     if (!renderTextureToImage(*texture, targetImage, inBoundsClipBox.topLeft(), isInverted)) {
+        clientBuffer->unmap();
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return false;
     }

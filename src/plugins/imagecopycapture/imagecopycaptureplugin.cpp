@@ -227,11 +227,16 @@ void ImageCopyCaptureSessionImpl::handleOutputSizeChange()
 {
     damageWholeFrame();
     advertiseBufferConstraints();
+
+    // This will likely fail because the constraints have changed,
+    // but it is possible that the constraints have not changed.
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::handleOutputTransformChange()
 {
     damageWholeFrame();
+    sendFrameUpdatesIfAny();
 }
 
 void ImageCopyCaptureSessionImpl::handleOutputDestroyed()

@@ -116,7 +116,7 @@ protected:
      * @param damage An area needs to be re-painted into the buffer of the next
      *               frame that is captured.
      */
-    virtual void addClientBufferDamage(const QRect & damage) = 0;
+    virtual void damageClientBuffer(const QRect & damage) = 0;
 
     /**
      * Send buffer size constraint to the client.

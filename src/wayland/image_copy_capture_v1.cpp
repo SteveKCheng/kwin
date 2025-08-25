@@ -163,7 +163,7 @@ protected:
             return;
         }
 
-        m_session->addClientBufferDamage(QRect(x, y, width, height));
+        m_session->damageClientBuffer(QRect(x, y, width, height));
     }
 
     void ext_image_copy_capture_frame_v1_capture(Resource *resource) override

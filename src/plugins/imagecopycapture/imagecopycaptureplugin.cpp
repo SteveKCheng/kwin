@@ -43,7 +43,7 @@ public:
                                 bool overlayCursor);
 protected:
     void captureFrame() override;
-    void addClientBufferDamage(const QRect & damage) override;
+    void damageClientBuffer(const QRect & damage) override;
 
 private Q_SLOTS:
     void handleOutputDamage(const QRegion &damageLogical);
@@ -403,7 +403,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     clearDamage(newCursorBox);
 }
 
-void ImageCopyCaptureSessionImpl::addClientBufferDamage(const QRect &damage)
+void ImageCopyCaptureSessionImpl::damageClientBuffer(const QRect &damage)
 {
     m_bufferDamage |= damage;
 }

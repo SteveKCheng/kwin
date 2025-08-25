@@ -348,7 +348,8 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
 
 QRectF ImageCopyCaptureSessionImpl::getCursorBox() const
 {
-    Q_ASSERT(m_output != nullptr);
+    Output* output = m_output.get();
+    Q_ASSERT(output != nullptr);
 
     if (!m_cursorHasChanged) {
         return m_lastCursorBox;
@@ -358,7 +359,7 @@ QRectF ImageCopyCaptureSessionImpl::getCursorBox() const
         const auto* cursors = Cursors::self();
         const Cursor* cursor = cursors->currentCursor();
         if (!cursors->isCursorHidden() && cursor != nullptr) {
-            return scaledRect(cursor->geometry(), m_output->scale());
+            return scaledRect(output->mapFromGlobal(cursor->geometry()), output->scale());
         }
     }
 

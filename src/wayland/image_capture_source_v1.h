@@ -37,7 +37,7 @@ enum class ImageCaptureSourceType {
  * internal operation of @c OutputImageCaptureSourceManagerV1Interface,
  * but that could change.
  */
-class KWIN_EXPORT ImageCaptureSourceV1Interface final : public QObject
+class ImageCaptureSourceV1Interface final : public QObject
 {
     Q_OBJECT
 

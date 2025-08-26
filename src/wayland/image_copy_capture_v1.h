@@ -6,9 +6,7 @@
 
 #pragma once
 
-#include "core/output.h"
 #include "kwin_export.h"
-
 #include <QObject>
 
 struct wl_resource;
@@ -17,7 +15,7 @@ namespace KWin
 {
 
 class Display;
-class OutputInterface;
+class Output;
 class ImageCopyCaptureManagerV1InterfacePrivate;
 class ImageCopyCaptureSessionV1InterfacePrivate;
 class ImageCopyCaptureFrameV1InterfacePrivate;

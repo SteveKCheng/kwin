@@ -28,10 +28,14 @@ enum class ImageCaptureSourceType {
 };
 
 /**
- * The ImageCaptureSourceV1Interface represents an opaque image capture source.
- * 
- * This is a concrete class that wraps the ext_image_capture_source_v1 interface.
- * It maintains information about what type of source it represents.
+ * @brief Represents a capture source for the Wayland ext-image-capture-source protocol.
+ *
+ * This is a concrete class that wraps the @c ext_image_capture_source_v1 interface.
+ *
+ * As the current implementation only supports capturing Output (@c wl_output),
+ * this general representation of a capture source is only used during the
+ * internal operation of @c OutputImageCaptureSourceManagerV1Interface,
+ * but that could change.
  */
 class KWIN_EXPORT ImageCaptureSourceV1Interface final : public QObject
 {
@@ -63,9 +67,12 @@ private:
 };
 
 /**
- * The OutputImageCaptureSourceManagerV1Interface provides ext_output_image_capture_source_manager_v1 support.
- * 
- * This manages the creation of image capture source objects for wl_output objects.
+ * @brief Represents the manager object for the Wayland ext-image-capture-source protocol.
+ *
+ * This is a concrete class that wraps the @c ext_output_image_capture_source_manager_v1 interface.
+ *
+ * This class must be instantiated too (as a singleton) for ImageCopyCaptureManagerV1Interface
+ * (@c ext_image_copy_capture_manager_v1) to be usable for Wayland clients.
  */
 class KWIN_EXPORT OutputImageCaptureSourceManagerV1Interface final : public QObject
 {

@@ -26,13 +26,16 @@ class ImageCopyCaptureSessionV1Interface;
 class ShmClientBuffer;
 
 /**
- * The ImageCopyCaptureManagerV1Interface provides ext_image_copy_capture protocol support.
- * 
- * This allows clients to capture screen content directly to client-provided buffers,
- * which is much more efficient for VNC and similar applications than the PipeWire-based
- * screencast protocol.
- * 
- * The ImageCopyCaptureManagerV1Interface corresponds to the Wayland interface @c ext_image_copy_capture_manager_v1.
+ * @brief The manager object for the Wayland ext-image-copy-capture protocol.
+ *
+ * This class corresponds to the Wayland interface @c ext_image_copy_capture_manager_v1;
+ * it encapsulates the low-level details of the Wayland protocol.
+ *
+ * This class is abstract.  It is inherited from the @c imagecopycapture plug-in
+ * to implement the manager's operations.
+ *
+ * The derived class is instantiated as a singleton to
+ * make the manager object available to Wayland clients.
  */
 class KWIN_EXPORT ImageCopyCaptureManagerV1Interface : public QObject
 {
@@ -57,16 +60,16 @@ protected:
      * through the methods such as ImageCopyCaptureSessionV1Interface::sendBufferSize
      * and ImageCopyCaptureSessionV1Interface::sendShmFormat.
      *
-     * This method is invoked in reaction to the client issuing the \c create_session
-     * request on the "image copy capture" manager.
+     * This method is invoked in reaction to the client issuing the @c create_session
+     * request.
      *
      * @param resource The Wayland resource behind the implementation.
-     *                 Should be passed to the constructor of
-     *                 ImageCopyCaptureSessionV1Interface.
-     * @param output The output to capture from
-     * @param overlayCursor Whether to overlay cursor onto captured frames
+     *                 This argument should be passed to the constructor of
+     *                 ImageCopyCaptureSessionV1Interface, and only once.
+     * @param output The output the client requested to capture from.
+     * @param overlayCursor Whether to overlay cursor onto the captured frames.
      *
-     * @return Newly instantiated session object or nullptr on failure
+     * @return Newly instantiated session object, or null on failure
      */
     virtual ImageCopyCaptureSessionV1Interface *createSession(wl_resource* resource,
                                                               Output *output,
@@ -78,8 +81,14 @@ private:
 };
 
 /**
- * @brief Per-client session (state) object for ImageCopyCaptureManagerV1Interface.
- */
+ * @brief The session (state) object for the Wayland ext-image-copy-capture protocol.
+ *
+ * This class corresponds to the Wayland interface @c ext_image_copy_capture_session_v1;
+ * it encapsulates the low-level details of the Wayland protocol.
+ *
+ * This class is abstract.  It is inherited from the @c imagecopycapture plug-in
+ * to implement the session's operations.
+*/
 class KWIN_EXPORT ImageCopyCaptureSessionV1Interface : public QObject
 {
     Q_OBJECT
@@ -94,10 +103,13 @@ protected:
     /**
      * @brief Request for capturing one frame from the client.
      *
-     * This method is invoked in reaction to the client issuing the \c capture request
+     * This method is invoked in reaction to the client issuing the @c capture request
      * on a frame.
      *
-     * The frame being captured is reported by #getCurrentFrame.
+     * Note that there is no virtual method corresponding to the
+     * @c create_frame request; the created frame to capture into
+     * is simply made available by #getCurrentFrame.
+     *
      */
     virtual void captureFrame() = 0;
 
@@ -105,13 +117,18 @@ protected:
      * @brief Register a rectangle in the client's buffer that must be considered
      *        damaged.
      *
-     * This method is invoked in reaction to the client issuing the \c damage_buffer request
+     * This method is invoked in reaction to the client issuing the @c damage_buffer request
      * on a frame.  As the protocol specification says, it enables the compositor
      * to optimize by reducing copying.
      *
      * This method may be invoked multiple times to register a union of rectangles
      * to be damaged.  These invocations happen before #captureFrame but after
      * the preceding frame is destroyed (by the client).
+     *
+     * This method corresponds to the client request @c damage_buffer on
+     * @c ext_image_copy_capture_frame_v1.  It is in this class and not
+     * in ImageCopyCaptureFrameV1Interface so the latter class does not have to
+     * be abstract.
      *
      * @param damage An area needs to be re-painted into the buffer of the next
      *               frame that is captured.
@@ -177,9 +194,13 @@ private:
 
 
 /**
- * The ImageCopyCaptureFrameV1Interface represents a single frame capture request.
- * 
- * The ImageCopyCaptureFrameV1Interface corresponds to the Wayland interface @c ext_image_copy_capture_frame_v1.
+ * @brief Represents a single request to capture a frame, from ImageCopyCaptureSessionV1Interface.
+ *
+ * Corresponds to the Wayland interface @c ext_image_copy_capture_frame_v1.
+ *
+ * This class is concrete: (the derived class of) ImageCopyCaptureSessionV1Interface
+ * calls methods on this class to retrieve information on buffers supplied by the client,
+ * and to report the results of the frame capture.
  */
 class KWIN_EXPORT ImageCopyCaptureFrameV1Interface final : public QObject
 {
@@ -230,7 +251,7 @@ public:
     void sendReady();
 
     /**
-     * The reason for failing to capture a frame.
+     * @brief The reason for failing to capture a frame, to report to the client.
      */
     enum class FailureReason : uint32_t
     {

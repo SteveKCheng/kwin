@@ -29,7 +29,7 @@ public:
 
     ImageCaptureSourceV1Interface * const m_parent;
 
-    ImageCaptureSourceType m_sourceType;
+    ImageCaptureSourceV1Interface::SourceType m_sourceType;
     QPointer<Output> m_output; // Only valid for output sources
 
 protected:
@@ -86,7 +86,7 @@ protected:
 
         // Create the source object
         auto* inst = new ImageCaptureSourceV1Interface(m_parent);
-        inst->d->m_sourceType = ImageCaptureSourceType::Output;
+        inst->d->m_sourceType = ImageCaptureSourceV1Interface::SourceType::Output;
         inst->d->m_output = outputInterface->handle();
         inst->d->init(sourceResource);
     }
@@ -110,7 +110,7 @@ ImageCaptureSourceV1Interface* ImageCaptureSourceV1Interface::get(struct wl_reso
     return priv ? priv->m_parent : nullptr;
 }
 
-ImageCaptureSourceType ImageCaptureSourceV1Interface::sourceType() const
+ImageCaptureSourceV1Interface::SourceType ImageCaptureSourceV1Interface::sourceType() const
 {
     return d->m_sourceType;
 }

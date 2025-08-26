@@ -20,14 +20,6 @@ class ImageCaptureSourceV1InterfacePrivate;
 class OutputImageCaptureSourceManagerV1InterfacePrivate;
 
 /**
- * @brief Source type enum for type-safe discrimination.
- */
-enum class ImageCaptureSourceType {
-    Output,
-    ForeignToplevel  // Not yet implemented
-};
-
-/**
  * @brief Represents a capture source for the Wayland ext-image-capture-source protocol.
  *
  * This is a concrete class that wraps the @c ext_image_capture_source_v1 interface.
@@ -45,9 +37,18 @@ public:
     ~ImageCaptureSourceV1Interface() override;
 
     /**
+     * @brief Enumerates the possible types of capture sources.
+     */
+    enum class SourceType
+    {
+        Output,
+        ForeignToplevel
+    };
+
+    /**
      * @brief Get the type of this capture source.
      */
-    ImageCaptureSourceType sourceType() const;
+    SourceType sourceType() const;
 
     /**
      * @brief Get the output if this is an output source, nullptr otherwise.

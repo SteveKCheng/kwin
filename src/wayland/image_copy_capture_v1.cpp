@@ -197,7 +197,7 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
     }
 
     // For now, we only support output sources
-    if (sourceInterface->sourceType() != ImageCaptureSourceType::Output) {
+    if (sourceInterface->sourceType() != ImageCaptureSourceV1Interface::SourceType::Output) {
         wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "unsupported source type");
         return;
     }

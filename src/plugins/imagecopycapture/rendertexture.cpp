@@ -26,9 +26,9 @@ static void grabTextureToImage(EglContext& context,
     const bool invertNeeded = (context.isOpenGLES() != (texture.contentTransform() != OutputTransform::FlipY));
     const bool autoInvert = invertNeeded && context.supportsPackInvert();
     isInverted = invertNeeded;
-    GLboolean prev;
+    GLboolean oldPackInversion;
     if (autoInvert) {
-        glGetBooleanv(GL_PACK_INVERT_MESA, &prev);
+        glGetBooleanv(GL_PACK_INVERT_MESA, &oldPackInversion);
         glPixelStorei(GL_PACK_INVERT_MESA, GL_TRUE);
         isInverted = false;
     }
@@ -41,30 +41,34 @@ static void grabTextureToImage(EglContext& context,
 
     if (!context.isOpenGLES() && context.glPlatform()->driver() != Driver_NVidia &&
         texture.size() == target.size() && topLeft.isNull()) {
-        context.glGetnTexImage(texture.target(), 0, GL_BGRA, GL_UNSIGNED_BYTE,
+        // Optimized path for full screen
+        context.glGetnTexImage(texture.target(), 0,
+                               GL_BGRA, GL_UNSIGNED_BYTE,
                                target.sizeInBytes(), target.bits());
     } else {
-        // Bind a framebuffer to texture, then read the desired region
-        // from the framebuffer.
+        // Bind a Framebuffer Object against the texture, to read the desired region.
+        // Unfortunately, we cannot use glGetTextureSubImage since it does not work for
+        // multi-sample textures.
         GLFramebuffer fbo(&texture);
         GLFramebuffer::pushFramebuffer(&fbo);
 
-        auto y = isInverted ? target.height() - topLeft.y() : topLeft.y();
+        auto y = isInverted ? target.height() - topLeft.y()
+                               : topLeft.y();
 
         context.glReadnPixels(topLeft.x(), y, target.width(), target.height(),
-                             GL_BGRA, GL_UNSIGNED_BYTE,
+                              GL_BGRA, GL_UNSIGNED_BYTE,
                               target.sizeInBytes(), target.bits());
 
         GLFramebuffer::popFramebuffer();
     }
 
+    texture.unbind();
+
     // Restore GL context parameters
     glPixelStorei(GL_PACK_ROW_LENGTH, oldRowLength);
     if (autoInvert) {
-        glPixelStorei(GL_PACK_INVERT_MESA, prev);
+        glPixelStorei(GL_PACK_INVERT_MESA, oldPackInversion);
     }
-
-    texture.unbind();
 }
 
 /**

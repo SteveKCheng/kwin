@@ -9,16 +9,22 @@
 #include "opengl/gltexture.h"
 #include "opengl/glutils.h"
 #include "opengl/eglcontext.h"
+#include "opengl/eglbackend.h"
+#include "utils/common.h"
+#include "compositor.h"
+#include "core/output.h"
 
 namespace KWin
 {
 
-static void grabTextureToImage(GLTexture& texture, QImage& target, const QPoint &topLeft, bool &isInverted)
+static void grabTextureToImage(EglContext& context,
+                               GLTexture& texture,
+                               QImage& target,
+                               const QPoint &topLeft,
+                               bool &isInverted)
 {
-    const auto context = EglContext::currentContext();
-
-    const bool invertNeeded = (context->isOpenGLES() != (texture.contentTransform() != OutputTransform::FlipY));
-    const bool autoInvert = invertNeeded && context->supportsPackInvert();
+    const bool invertNeeded = (context.isOpenGLES() != (texture.contentTransform() != OutputTransform::FlipY));
+    const bool autoInvert = invertNeeded && context.supportsPackInvert();
     isInverted = invertNeeded;
     GLboolean prev;
     if (autoInvert) {
@@ -33,10 +39,10 @@ static void grabTextureToImage(GLTexture& texture, QImage& target, const QPoint 
 
     texture.bind();
 
-    if (!context->isOpenGLES() && context->glPlatform()->driver() != Driver_NVidia &&
+    if (!context.isOpenGLES() && context.glPlatform()->driver() != Driver_NVidia &&
         texture.size() == target.size() && topLeft.isNull()) {
-        context->glGetnTexImage(texture.target(), 0, GL_BGRA, GL_UNSIGNED_BYTE,
-                                target.sizeInBytes(), target.bits());
+        context.glGetnTexImage(texture.target(), 0, GL_BGRA, GL_UNSIGNED_BYTE,
+                               target.sizeInBytes(), target.bits());
     } else {
         // Bind a framebuffer to texture, then read the desired region
         // from the framebuffer.
@@ -45,8 +51,8 @@ static void grabTextureToImage(GLTexture& texture, QImage& target, const QPoint 
 
         auto y = isInverted ? target.height() - topLeft.y() : topLeft.y();
 
-        context->glReadnPixels(topLeft.x(), y, target.width(), target.height(),
-                              GL_BGRA, GL_UNSIGNED_BYTE,
+        context.glReadnPixels(topLeft.x(), y, target.width(), target.height(),
+                             GL_BGRA, GL_UNSIGNED_BYTE,
                               target.sizeInBytes(), target.bits());
 
         GLFramebuffer::popFramebuffer();
@@ -86,9 +92,29 @@ static void grabTextureToImage(GLTexture& texture, QImage& target, const QPoint 
  */
 bool renderTextureToImage(GLTexture& texture, QImage& target, const QPoint &topLeft, bool &isInverted)
 {
+    // When the cursor is moved off the screen, there may be no current EglContext.
+    // This might be happening because the "offscreen quick view" effect is cancelling
+    // the current EglContext (that is, it calls EglContext::doneCurrent).  Apparently
+    // effects plug-ins might be using a EglContext that is different than what kwin's
+    // EglBackend normally uses.
+    //
+    // Since this function can be called in response to a request from an
+    // image-copy-capture client, we need the EglContext even if one is not active
+    // right now.  Install back the standard context if it is not present.
+    auto* context = EglContext::currentContext();
+    if (context == nullptr) {
+        const auto* backend = qobject_cast<EglBackend*>(Compositor::self()->backend());
+        if (backend == nullptr ||
+            (context = backend->openglContext()) == nullptr ||
+            !context->makeCurrent()) {
+            qCritical() << "No OpenGL context available for texture capture";
+            return false;
+        }
+    }
+
     const OutputTransform contentTransform = texture.contentTransform();
     if (contentTransform == OutputTransform::Normal || contentTransform == OutputTransform::FlipY) {
-        grabTextureToImage(texture, target, topLeft, isInverted);
+        grabTextureToImage(*context, texture, target, topLeft, isInverted);
     } else {
         const QSize contentSize = contentTransform.map(texture.size());
         const auto backingTexture = GLTexture::allocate(GL_RGBA8, contentSize);
@@ -108,7 +134,7 @@ bool renderTextureToImage(GLTexture& texture, QImage& target, const QPoint &topL
         texture.render(contentSize);
         GLFramebuffer::popFramebuffer();
 
-        grabTextureToImage(*backingTexture, target, topLeft, isInverted);
+        grabTextureToImage(*context, *backingTexture, target, topLeft, isInverted);
     }
 
     return true;

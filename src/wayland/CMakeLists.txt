@@ -144,6 +144,8 @@ target_sources(kwin PRIVATE
     region.cpp
     relativepointer_v1.cpp
     screencast_v1.cpp
+    image_copy_capture_v1.cpp
+    image_capture_source_v1.cpp
     screenedge_v1.cpp
     seat.cpp
     securitycontext_v1.cpp
@@ -234,6 +236,8 @@ install(FILES
     quirks.h
     relativepointer_v1.h
     screencast_v1.h
+    image_copy_capture_v1.h
+    image_capture_source_v1.h
     screenedge_v1.h
     seat.h
     securitycontext_v1.h

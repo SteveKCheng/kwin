@@ -37,6 +37,8 @@ ecm_add_qtwayland_server_protocol_kde(WaylandProtocols_xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/wlr-layer-shell-unstable-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/xx-fractional-scale-v2.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/xx-pip-v1.xml
+        ${PROJECT_SOURCE_DIR}/src/wayland/protocols/ext-image-copy-capture-v1.xml
+        ${PROJECT_SOURCE_DIR}/src/wayland/protocols/ext-image-capture-source-v1.xml
 
         ${WaylandProtocols_DATADIR}/stable/presentation-time/presentation-time.xml
         ${WaylandProtocols_DATADIR}/stable/tablet/tablet-v2.xml

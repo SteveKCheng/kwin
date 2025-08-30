@@ -8,11 +8,9 @@
 #include "display.h"
 #include "image_capture_source_v1.h"
 #include "output.h"
-#include "wayland/output.h"
 #include "wayland/shmclientbuffer_p.h"
 
 #include <QPointer>
-
 #include <chrono>
 
 #include "qwayland-server-ext-image-copy-capture-v1.h"
@@ -24,15 +22,15 @@ static const int s_version = 1;
 
 class ImageCopyCaptureManagerV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_manager_v1
 {
+    /// Pointer to the parent of this pimpl, required for calling its virtual methods.
+    ImageCopyCaptureManagerV1Interface *const m_parent;
+
 public:
     ImageCopyCaptureManagerV1InterfacePrivate(ImageCopyCaptureManagerV1Interface *q, Display *display)
         : QtWaylandServer::ext_image_copy_capture_manager_v1(*display, s_version)
         , m_parent(q)
     {
     }
-
-private:
-    ImageCopyCaptureManagerV1Interface *const m_parent;
 
 protected:
     void ext_image_copy_capture_manager_v1_destroy(Resource *resource) override
@@ -56,85 +54,64 @@ protected:
     }
 };
 
-class ImageCopyCaptureSessionV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_session_v1
-{
-public:
-    ImageCopyCaptureSessionV1InterfacePrivate(ImageCopyCaptureSessionV1Interface *q)
-        : m_parent(q)
-    {
-    }
-
-    QPointer<ImageCopyCaptureFrameV1Interface> m_currentFrame;
-    bool m_ownsResource = false;
-
-    ImageCopyCaptureFrameV1Interface *getCurrentFrame() const;
-
-private:
-    /**
-     * @brief Pointer to the owner of this private pimpl.
-     */
-    ImageCopyCaptureSessionV1Interface *const m_parent;
-
-protected:
-    void ext_image_copy_capture_session_v1_destroy_resource(Resource *resource) override
-    {
-        delete m_parent;
-    }
-
-    void ext_image_copy_capture_session_v1_destroy(Resource *resource) override
-    {
-        if (m_ownsResource) {
-            wl_resource_destroy(resource->handle);
-            m_ownsResource = false;
-        }
-    }
-
-    void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override;
-};
-
 class ImageCopyCaptureFrameV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_frame_v1
 {
+    /// Pointer to the owner of this pimpl, required for deletion only.
+    ImageCopyCaptureFrameV1Interface *const m_parent;
+
 public:
-    ImageCopyCaptureFrameV1InterfacePrivate(ImageCopyCaptureFrameV1Interface *q,
-                                            ImageCopyCaptureSessionV1Interface *session)
-        : m_parent(q)
+    ImageCopyCaptureFrameV1InterfacePrivate(ImageCopyCaptureFrameV1Interface *parent, ImageCopyCaptureSessionV1Interface *session)
+        : m_parent(parent)
         , m_session(session)
     {
     }
 
     QPointer<ShmClientBuffer> m_shmClientBuffer;
-    bool m_captureRequested = false;
-    bool m_captureDone = false;
 
-private:
-    /**
-     * @brief Pointer to the owner of this private pimpl, required for deletion.
-     */
-    ImageCopyCaptureFrameV1Interface *const m_parent;
+    enum class Stage {
+        NotCreated, ///< No current frame
+        Created, ///< Client created the frame, but not capturing yet
+        Capturing, ///< Capturing was requested by the client
+        Finished, ///< Capturing is finished (success or failure)
+    };
 
     /**
-     * @brief Pointer to the session that owns this frame.
+     * @brief Stage of this frame in its lifecycle (within the capture session).
+     *
+     * This must be tracked for checking errors in usage, and because a single C++ object
+     * is re-used for all frames created by the client for the session.
      */
-    ImageCopyCaptureSessionV1Interface *const m_session;
+    Stage m_stage = Stage::NotCreated;
+
+    /**
+     * @brief Pointer to the session that owns this frame, required for calling
+     *        its virtual methods.
+     *
+     * Set to null once the session has gone away.  If non-null, the session is alive.
+     */
+    ImageCopyCaptureSessionV1Interface *m_session;
 
 protected:
     void ext_image_copy_capture_frame_v1_destroy_resource(Resource *resource) override
     {
-        // Clear the current frame pointer in the session
-        if (m_session->d->m_currentFrame == m_parent) {
-            m_session->d->m_currentFrame = nullptr;
+        if (m_session == nullptr) {
+            // The session has gone away, and thus this object is no longer owned by it
+            delete m_parent;
         }
-        delete m_parent;
     }
 
     void ext_image_copy_capture_frame_v1_destroy(Resource *resource) override
     {
+        m_stage = Stage::NotCreated;
+        m_shmClientBuffer = nullptr;
+
         wl_resource_destroy(resource->handle);
     }
 
     void ext_image_copy_capture_frame_v1_attach_buffer(Resource *resource, struct ::wl_resource *buffer) override
     {
-        if (m_captureRequested) {
+        Q_ASSERT(m_stage != Stage::NotCreated);
+        if (m_stage != Stage::Created) {
             wl_resource_post_error(resource->handle, error_already_captured, "capture already requested");
             return;
         }
@@ -153,7 +130,8 @@ protected:
                                                        int32_t x, int32_t y,
                                                        int32_t width, int32_t height) override
     {
-        if (m_captureRequested) {
+        Q_ASSERT(m_stage != Stage::NotCreated);
+        if (m_stage != Stage::Created) {
             wl_resource_post_error(resource->handle, error_already_captured, "capture already requested");
             return;
         }
@@ -163,12 +141,19 @@ protected:
             return;
         }
 
+        // Silently ignore if the session already has been destroyed.
+        // This frame cannot be captured anyway so client damage is irrelevant.
+        if (m_session == nullptr) {
+            return;
+        }
+
         m_session->damageClientBuffer(QRect(x, y, width, height));
     }
 
     void ext_image_copy_capture_frame_v1_capture(Resource *resource) override
     {
-        if (m_captureRequested) {
+        Q_ASSERT(m_stage != Stage::NotCreated);
+        if (m_stage != Stage::Created) {
             wl_resource_post_error(resource->handle, error_already_captured, "capture already requested");
             return;
         }
@@ -178,9 +163,88 @@ protected:
             return;
         }
 
-        m_captureRequested = true;
+        if (m_session == nullptr) {
+            // Session was destroyed first.  Cannot capture.
+            send_failed(failure_reason_stopped);
+            return;
+        }
+
+        m_stage = Stage::Capturing;
         m_session->captureFrame();
     }
+};
+
+class ImageCopyCaptureSessionV1InterfacePrivate final : public QtWaylandServer::ext_image_copy_capture_session_v1
+{
+    /// Pointer to the owner of this private pimpl.
+    ImageCopyCaptureSessionV1Interface *const m_parent;
+
+    /**
+     * @brief Object for the frame associated to this session.
+     *
+     * The protocol only allows at most one frame to exist for any session so we can optimize
+     * by allocating only one object and re-using it.  The logical state of the frame
+     * is tracked in ImageCopyCaptureFrameV1InterfacePrivate::m_stage.
+     *
+     * When this session is deleted, the protocol says an outstanding frame from the client's point
+     * of view is "not affected" (although, clearly, no capturing can happen subsequently).
+     * To implement this requirement, ownership of the frame is passed from this session
+     * to the frame itself in the destructor of the session.
+     */
+    std::unique_ptr<ImageCopyCaptureFrameV1Interface> m_currentFrame;
+
+public:
+    ImageCopyCaptureSessionV1InterfacePrivate(ImageCopyCaptureSessionV1Interface *q)
+        : m_parent(q)
+        , m_currentFrame(new ImageCopyCaptureFrameV1Interface(q))
+    {
+    }
+
+    ~ImageCopyCaptureSessionV1InterfacePrivate()
+    {
+        // If the client has not yet destroyed the frame owned by this session,
+        // nullify the pointer to this session (which would become dangling otherwise),
+        // then let the frame delete itself when the client destroys it.
+        if (m_currentFrame->d->m_stage != ImageCopyCaptureFrameV1InterfacePrivate::Stage::NotCreated) {
+            m_currentFrame->d->m_session = nullptr;
+            m_currentFrame.release();
+        }
+    }
+
+    /**
+     * @brief Whether this C++ object is responsible for destroying the corresponding Wayland resource
+     *        for the capture session.
+     *
+     * Normally it is responsible, but when the client requests to create a session,
+     * the Wayland resource is created first before a derived instance of this class
+     * is constructed.  If failure occurs, i.e. the instance is not constructed,
+     * the Wayland resource must be destroyed, so the caller of
+     * ImageCopyCaptureManager::createSession must temporarily have ownership
+     * of that resource.  Yet, we need the Wayland resource be available so
+     * the implementation of ImageCopyCaptureManager::createSession can send
+     * buffer constraints; thus at the time this object must borrow the Wayland
+     * resource, and this flag is set to false to reflect that.  Once
+     * ownership has been passed to this object, this flag is set to true.
+     */
+    bool m_ownsResource = false;
+
+    ImageCopyCaptureFrameV1Interface *getCurrentFrame();
+
+protected:
+    void ext_image_copy_capture_session_v1_destroy_resource(Resource *resource) override
+    {
+        delete m_parent;
+    }
+
+    void ext_image_copy_capture_session_v1_destroy(Resource *resource) override
+    {
+        if (m_ownsResource) {
+            wl_resource_destroy(resource->handle);
+            m_ownsResource = false;
+        }
+    }
+
+    void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override;
 };
 
 //
@@ -240,7 +304,9 @@ ImageCopyCaptureManagerV1Interface::~ImageCopyCaptureManagerV1Interface() = defa
 
 void ImageCopyCaptureSessionV1InterfacePrivate::ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id)
 {
-    if (m_currentFrame) {
+    auto *d = m_currentFrame->d.get();
+
+    if (d->m_stage != ImageCopyCaptureFrameV1InterfacePrivate::Stage::NotCreated) {
         wl_resource_post_error(resource->handle, error_duplicate_frame, "frame already exists for this session");
         return;
     }
@@ -251,9 +317,8 @@ void ImageCopyCaptureSessionV1InterfacePrivate::ext_image_copy_capture_session_v
         return;
     }
 
-    auto *frame = new ImageCopyCaptureFrameV1Interface(m_parent);
-    frame->d->init(frameResource);
-    m_currentFrame = frame;
+    d->init(frameResource);
+    d->m_stage = ImageCopyCaptureFrameV1InterfacePrivate::Stage::Created;
 }
 
 ImageCopyCaptureSessionV1Interface::ImageCopyCaptureSessionV1Interface(wl_resource *resource,
@@ -301,10 +366,11 @@ ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1Interface::getCurrent
     return d->getCurrentFrame();
 }
 
-ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1InterfacePrivate::getCurrentFrame() const
+ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1InterfacePrivate::getCurrentFrame()
 {
-    auto *frame = m_currentFrame.get();
-    return (frame != nullptr && frame->d->m_captureRequested && !frame->d->m_captureDone) ? frame : nullptr;
+    return (m_currentFrame->d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing)
+        ? m_currentFrame.get()
+        : nullptr;
 }
 
 //
@@ -312,8 +378,7 @@ ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1InterfacePrivate::get
 //
 
 ImageCopyCaptureFrameV1Interface::ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session)
-    : QObject(session)
-    , d(std::make_unique<ImageCopyCaptureFrameV1InterfacePrivate>(this, session))
+    : d(std::make_unique<ImageCopyCaptureFrameV1InterfacePrivate>(this, session))
 {
 }
 
@@ -321,25 +386,25 @@ ImageCopyCaptureFrameV1Interface::~ImageCopyCaptureFrameV1Interface() = default;
 
 ShmClientBuffer *ImageCopyCaptureFrameV1Interface::getShmClientBuffer()
 {
-    Q_ASSERT(!d->m_captureDone);
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
     return d->m_shmClientBuffer.get();
 }
 
 void ImageCopyCaptureFrameV1Interface::sendTransform(uint32_t transform)
 {
-    Q_ASSERT(!d->m_captureDone);
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
     d->send_transform(transform);
 }
 
 void ImageCopyCaptureFrameV1Interface::sendDamage(const QRect &rect)
 {
-    Q_ASSERT(!d->m_captureDone);
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
     d->send_damage(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
 void ImageCopyCaptureFrameV1Interface::sendPresentationTime(std::chrono::nanoseconds timestamp)
 {
-    Q_ASSERT(!d->m_captureDone);
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
     uint64_t tv_sec = std::chrono::duration_cast<std::chrono::seconds>(timestamp).count();
     uint32_t tv_sec_hi = tv_sec >> 32;
     uint32_t tv_sec_lo = tv_sec & 0xFFFFFFFF;
@@ -349,15 +414,15 @@ void ImageCopyCaptureFrameV1Interface::sendPresentationTime(std::chrono::nanosec
 
 void ImageCopyCaptureFrameV1Interface::sendReady()
 {
-    Q_ASSERT(!d->m_captureDone);
-    d->m_captureDone = true;
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
+    d->m_stage = ImageCopyCaptureFrameV1InterfacePrivate::Stage::Finished;
     d->send_ready();
 }
 
 void ImageCopyCaptureFrameV1Interface::sendFailed(FailureReason reason)
 {
-    Q_ASSERT(!d->m_captureDone);
-    d->m_captureDone = true;
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
+    d->m_stage = ImageCopyCaptureFrameV1InterfacePrivate::Stage::Finished;
     d->send_failed(static_cast<uint>(reason));
 }
 

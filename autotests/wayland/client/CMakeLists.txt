@@ -202,6 +202,25 @@ add_test(NAME kwayland-testError COMMAND testError)
 ecm_mark_as_test(testError)
 
 ########################################################
+# Test ImageCopyCapture
+########################################################
+set( testImageCopyCapture_SRCS
+        test_image_copy_capture.cpp
+        imagecopyproxies.cpp
+        ${PROJECT_SOURCE_DIR}/tests/fakeoutput.cpp
+    )
+add_executable(testImageCopyCapture ${testImageCopyCapture_SRCS})
+qt6_generate_wayland_protocol_client_sources(testImageCopyCapture 
+    ${private_code_option}
+    FILES
+        ${CMAKE_SOURCE_DIR}/src/wayland/protocols/ext-image-copy-capture-v1.xml
+        ${CMAKE_SOURCE_DIR}/src/wayland/protocols/ext-image-capture-source-v1.xml
+)
+target_link_libraries( testImageCopyCapture Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client Wayland::Server)
+add_test(NAME kwayland-testImageCopyCapture COMMAND testImageCopyCapture)
+ecm_mark_as_test(testImageCopyCapture)
+
+########################################################
 # Test Selection
 ########################################################
 set( testSelection_SRCS

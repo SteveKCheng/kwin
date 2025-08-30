@@ -107,7 +107,6 @@ protected:
      * Note that there is no virtual method corresponding to the
      * @c create_frame request; the created frame to capture into
      * is simply made available by #getCurrentFrame.
-     *
      */
     virtual void captureFrame() = 0;
 
@@ -118,6 +117,10 @@ protected:
      * This method is invoked in reaction to the client issuing the @c damage_buffer request
      * on a frame.  As the protocol specification says, it enables the compositor
      * to optimize by reducing copying.
+     *
+     * Since the optimization is optional (and may be done in different ways),
+     * the buffer damage is not stored concretely (e.g. in a QRegion instance variable)
+     * in this base class or in the frame.
      *
      * This method may be invoked multiple times to register a union of rectangles
      * to be damaged.  These invocations happen before #captureFrame but after
@@ -167,8 +170,10 @@ protected:
      * Get the current frame being captured by this session, if any.
      *
      * Note that the protocol specification disallows more than one frame to exist
-     * for a given session at any time, so the caller does not need to worry
-     * about saving the return value.
+     * for a given session at any time.  So, as an optimization, the implementation
+     * of this method re-uses the same C++ object for subsequent frames "created"
+     * by the client.  However, the C++ interface is designed in the logical manner
+     * with the frame appearing as an independent object (pointer).
      *
      * Because the client can destroy a frame at any time,
      * this method may return null in the middle of a frame capture.  In that case
@@ -179,6 +184,11 @@ protected:
      * the (preceding) capture is already complete (by having called
      * ImageCopyCaptureFrameV1Interface::sendReady
      * or ImageCopyCaptureFrameV1Interface::sendFailed).
+     *
+     * Taking into account the above points, the caller should not save the returned
+     * pointer to the frame and expect it can be accessed later.  The scope of the
+     * returned (pointer to the) frame must be considered to last until the next
+     * request from the Wayland client begins processing.
      */
     ImageCopyCaptureFrameV1Interface *getCurrentFrame() const;
 
@@ -199,12 +209,10 @@ private:
  * calls methods on this class to retrieve information on buffers supplied by the client,
  * and to report the results of the frame capture.
  */
-class KWIN_EXPORT ImageCopyCaptureFrameV1Interface final : public QObject
+class KWIN_EXPORT ImageCopyCaptureFrameV1Interface final
 {
-    Q_OBJECT
-
 public:
-    ~ImageCopyCaptureFrameV1Interface() override;
+    ~ImageCopyCaptureFrameV1Interface();
 
     /**
      * @brief Get the shared-memory buffer from the client to copy the frame's contents
@@ -267,7 +275,7 @@ private:
     explicit ImageCopyCaptureFrameV1Interface(ImageCopyCaptureSessionV1Interface *session);
 
     friend class ImageCopyCaptureSessionV1InterfacePrivate; // for construction
-    const std::unique_ptr<ImageCopyCaptureFrameV1InterfacePrivate> d;
+    std::unique_ptr<ImageCopyCaptureFrameV1InterfacePrivate> const d;
 };
 
 } // namespace KWin

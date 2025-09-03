@@ -24,6 +24,7 @@
 #include "KWayland/Client/registry.h"
 #include "KWayland/Client/shm_pool.h"
 
+#include <cerrno> // for EPROTO
 
 // Classes used for testing
 #include "../../../tests/fakeoutput.h"
@@ -136,13 +137,16 @@ public:
 
 private Q_SLOTS:
     /// Initialize required server-side objects to test the image-copy-capture protocol.
-    void init();
+    void initTestCase();
 
     /// Clean up all server-side and client-side objects used during testing.
-    void cleanup();
+    void cleanupTestCase();
 
     /// Test against dummy server-side implementation defined in this test program
     void testDummyServer();
+
+    /// Test that error is signaled when protocol is misused.
+    void testProtocolError();
 
 private:
     std::unique_ptr<KWin::Display> m_display;
@@ -167,6 +171,12 @@ private:
 
     /// Clean up (destroy) objects for the client side of the Wayland connection.
     void cleanupClient();
+
+    /// Create capture session assuming #initClient has completed successfully
+    void createSession(std::unique_ptr<ImageCopyCaptureClient::CaptureSession> &session);
+
+    /// Test that error is signaled when protocol is misused.
+    void testProtocolErrorInternal(int subcase);
 };
 
 static const QString s_socketName = QStringLiteral("kwin-test-image-copy-capture-0");
@@ -179,7 +189,7 @@ TestImageCopyCapture::TestImageCopyCapture(QObject *parent)
 {
 }
 
-void TestImageCopyCapture::init()
+void TestImageCopyCapture::initTestCase()
 {
     using namespace KWin;
 
@@ -340,49 +350,119 @@ void TestImageCopyCapture::initClient()
     QVERIFY(m_clientShmPool->isValid());
 }
 
-void TestImageCopyCapture::testDummyServer()
+void TestImageCopyCapture::createSession(std::unique_ptr<ImageCopyCaptureClient::CaptureSession> &session)
 {
-    initClient();
-
-    // Create capture source using the new proxy class that provides automatic cleanup
+    // Select sole output available as capture source
     auto captureSource = m_captureSourceClient->createSource(*m_clientOutput);
     QVERIFY(captureSource);
     QVERIFY(captureSource->isValid());
 
-    // Set up spy for session creation
+    // Create session on capture source
     QSignalSpy sessionCreatedSpy(m_copyCaptureManager.get(), &TestImageCopyCaptureManager::sessionCreated);
-
-    // Create session using the new proxy class and CaptureSource object
-    auto session = m_copyCaptureClient->createSession(*captureSource, false);
+    session = m_copyCaptureClient->createSession(*captureSource, false);
     QVERIFY(session);
-
-    // Wait for server-side session creation
     QVERIFY(sessionCreatedSpy.wait());
+}
+
+void TestImageCopyCapture::testDummyServer()
+{
+    initClient();
+
+    std::unique_ptr<ImageCopyCaptureClient::CaptureSession> session;
+    createSession(session);
+    QVERIFY(session);
 
     // Test constraint gathering
     QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
     QVERIFY(constraintsSpy.wait());
-
     QVERIFY(session->constraintsDone());
     QCOMPARE(session->bufferSize(), QSize(800, 600));
     QVERIFY(session->shmFormats().contains(0)); // WL_SHM_FORMAT_ARGB8888
 
-    // Create a frame
-    auto frame = session->createFrame();
-    QVERIFY(frame);
+    // Capture multiple frames, to test frame lifecycle management
+    for (int i = 0; i < 3; ++i) {
+        // Create a frame with a SHM buffer
+        auto frame = session->createFrame();
+        QVERIFY(frame);
+        auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
+                                                 session->bufferSize().width() * 4,
+                                                 KWayland::Client::Buffer::Format::ARGB32);
+        frame->attachBuffer(*buffer.lock());
 
-    auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
-                                             session->bufferSize().width() * 4,
-                                             KWayland::Client::Buffer::Format::ARGB32);
-    frame->attachBuffer(*buffer.lock());
+        // Test frame capture
+        QSignalSpy frameSpy(frame.get(), &ImageCopyCaptureClient::CaptureFrame::ready);
+        frame->capture();
+        QVERIFY(frameSpy.wait());
+        QVERIFY(frame->isReady());
+        QVERIFY(!frame->hasFailed());
+    }
+}
 
-    // Test frame capture
-    QSignalSpy frameSpy(frame.get(), &ImageCopyCaptureClient::CaptureFrame::ready);
-    frame->capture();
-    QVERIFY(frameSpy.wait());
+void TestImageCopyCapture::testProtocolError()
+{
+    testProtocolErrorInternal(0);
+    testProtocolErrorInternal(1);
+    testProtocolErrorInternal(2);
+    testProtocolErrorInternal(3);
+}
 
-    QVERIFY(frame->isReady());
-    QVERIFY(!frame->hasFailed());
+void TestImageCopyCapture::testProtocolErrorInternal(int subcase)
+{
+    initClient();
+
+    // Set up error spy to detect protocol violations
+    QSignalSpy errorSpy(m_connection, &KWayland::Client::ConnectionThread::errorOccurred);
+
+    std::unique_ptr<ImageCopyCaptureClient::CaptureSession> session;
+    createSession(session);
+    QVERIFY(session);
+
+    auto frame1 = session->createFrame();
+    QVERIFY(frame1 && frame1->isValid());
+
+    switch (subcase) {
+    case 0: {
+        // error_duplicate_frame
+        auto frame2 = session->createFrame();
+        QVERIFY(frame2);
+        break;
+    }
+    case 1: {
+        // error_no_buffer
+        frame1->capture();
+        break;
+    }
+    case 2: {
+        QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
+        QVERIFY(constraintsSpy.wait());
+
+        auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
+                                                 session->bufferSize().width() * 4,
+                                                 KWayland::Client::Buffer::Format::ARGB32);
+        frame1->attachBuffer(*buffer.lock());
+
+        // error_invalid_buffer_damage
+        frame1->damageBuffer(QRect());
+        break;
+    }
+    case 3: {
+        QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
+        QVERIFY(constraintsSpy.wait());
+
+        auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
+                                                 session->bufferSize().width() * 4,
+                                                 KWayland::Client::Buffer::Format::ARGB32);
+        frame1->attachBuffer(*buffer.lock());
+        frame1->capture();
+
+        // error_already_captured
+        frame1->capture();
+        break;
+    }
+    }
+
+    QVERIFY(errorSpy.wait());
+    QCOMPARE(m_connection->errorCode(), EPROTO);
 }
 
 QTEST_GUILESS_MAIN(TestImageCopyCapture)

@@ -104,6 +104,9 @@ protected:
     {
         m_stage = Stage::NotCreated;
         m_shmClientBuffer = nullptr;
+        if (m_session != nullptr) {
+            m_session->frameDestroyed();
+        }
 
         wl_resource_destroy(resource->handle);
     }
@@ -334,6 +337,10 @@ ImageCopyCaptureSessionV1Interface::~ImageCopyCaptureSessionV1Interface() = defa
 void ImageCopyCaptureSessionV1Interface::sendBufferSize(const QSize &size)
 {
     d->send_buffer_size(size.width(), size.height());
+}
+
+void ImageCopyCaptureSessionV1Interface::frameDestroyed()
+{
 }
 
 void ImageCopyCaptureSessionV1Interface::sendShmFormat(uint32_t format)

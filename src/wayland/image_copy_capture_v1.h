@@ -115,7 +115,7 @@ protected:
      *        damaged.
      *
      * This method is invoked in reaction to the client issuing the @c damage_buffer request
-     * on a frame.  As the protocol specification says, it enables the compositor
+     * on the current frame.  As the protocol specification says, it enables the compositor
      * to optimize by reducing copying.
      *
      * Since the optimization is optional (and may be done in different ways),
@@ -135,6 +135,21 @@ protected:
      *               frame that is captured.
      */
     virtual void damageClientBuffer(const QRect &damage) = 0;
+
+    /**
+     * @brief Called when the current frame has been destroyed by the client.
+     *
+     * The implementation may take the opportunity to clear internal
+     * resources or tracking states.  (The implementation may elect to
+     * clear the state of the preceding frame when #captureFrame is called,
+     * or when capturing finishes, instead.)
+     *
+     * By the time this method is invoked, the destroyed frame is no longer
+     * accessible, i.e. #getCurrentFrame returns null.
+     *
+     * The default implementation of this method does nothing.
+     */
+    virtual void frameDestroyed();
 
     /**
      * Send buffer size constraint to the client.

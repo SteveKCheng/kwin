@@ -435,6 +435,7 @@ void TestImageCopyCapture::testProtocolError()
     testProtocolErrorInternal(1);
     testProtocolErrorInternal(2);
     testProtocolErrorInternal(3);
+    testProtocolErrorInternal(4);
 }
 
 void TestImageCopyCapture::testProtocolErrorInternal(int subcase)
@@ -451,45 +452,46 @@ void TestImageCopyCapture::testProtocolErrorInternal(int subcase)
     auto frame1 = session->createFrame();
     QVERIFY(frame1 && frame1->isValid());
 
+    QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
+    QVERIFY(constraintsSpy.wait());
+
+    auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
+                                             session->bufferSize().width() * 4,
+                                             KWayland::Client::Buffer::Format::ARGB32);
+
     switch (subcase) {
-    case 0: {
+    case 0:
         // error_duplicate_frame
-        auto frame2 = session->createFrame();
-        QVERIFY(frame2);
+        QVERIFY(session->createFrame());
         break;
-    }
-    case 1: {
+
+    case 1:
         // error_no_buffer
         frame1->capture();
         break;
-    }
-    case 2: {
-        QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
-        QVERIFY(constraintsSpy.wait());
 
-        auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
-                                                 session->bufferSize().width() * 4,
-                                                 KWayland::Client::Buffer::Format::ARGB32);
+    case 2:
         frame1->attachBuffer(*buffer.lock());
 
         // error_invalid_buffer_damage
         frame1->damageBuffer(QRect());
         break;
-    }
-    case 3: {
-        QSignalSpy constraintsSpy(session.get(), &ImageCopyCaptureClient::CaptureSession::constraintsReady);
-        QVERIFY(constraintsSpy.wait());
 
-        auto buffer = m_clientShmPool->getBuffer(session->bufferSize(),
-                                                 session->bufferSize().width() * 4,
-                                                 KWayland::Client::Buffer::Format::ARGB32);
+    case 3:
         frame1->attachBuffer(*buffer.lock());
         frame1->capture();
 
         // error_already_captured
         frame1->capture();
         break;
-    }
+
+    case 4:
+        frame1->attachBuffer(*buffer.lock());
+        frame1->capture();
+
+        // error_already_captured
+        frame1->attachBuffer(*buffer.lock());
+        break;
     }
 
     QVERIFY(errorSpy.wait());

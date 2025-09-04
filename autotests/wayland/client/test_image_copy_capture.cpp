@@ -70,6 +70,11 @@ protected:
         Q_EMIT clientBufferDamaged(damage);
     }
 
+    void frameDestroyed() override
+    {
+        m_clientBufferDamage.clear();
+    }
+
 public:
     KWin::Output *output() const
     {
@@ -119,10 +124,16 @@ protected:
     }
 
 public:
-    QVector<TestImageCopyCaptureSession *> m_sessions;
+    const QVector<TestImageCopyCaptureSession *> &sessions() const
+    {
+        return m_sessions;
+    }
 
 Q_SIGNALS:
     void sessionCreated(KWin::Output *output, bool overlayCursor);
+
+private:
+    QVector<TestImageCopyCaptureSession *> m_sessions;
 };
 
 /**
@@ -388,6 +399,26 @@ void TestImageCopyCapture::testDummyServer()
                                                  session->bufferSize().width() * 4,
                                                  KWayland::Client::Buffer::Format::ARGB32);
         frame->attachBuffer(*buffer.lock());
+
+        QCOMPARE(m_copyCaptureManager->sessions().size(), 1);
+
+        // Check that the server side can receive a client damage request
+        auto *serverSession = m_copyCaptureManager->sessions()[0];
+        QVERIFY(serverSession);
+        QSignalSpy clientBufferDamageSpy(serverSession, &TestImageCopyCaptureSession::clientBufferDamaged);
+        QRect damageRect;
+        if (i == 0) {
+            damageRect = QRect(QPoint(), session->bufferSize());
+        } else {
+            int k = (i - 1) % 2;
+            auto width = session->bufferSize().width();
+            auto height = session->bufferSize().height();
+            damageRect = QRect(QPoint(0, k != 0 ? height / 2 : 0), QSize(width, height));
+        }
+        frame->damageBuffer(damageRect);
+        QVERIFY(clientBufferDamageSpy.wait());
+        QCOMPARE(serverSession->clientBufferDamage().size(), 1);
+        QCOMPARE(serverSession->clientBufferDamage()[0], damageRect);
 
         // Test frame capture
         QSignalSpy frameSpy(frame.get(), &ImageCopyCaptureClient::CaptureFrame::ready);

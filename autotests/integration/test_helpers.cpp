@@ -46,6 +46,9 @@
 #include <KWayland/Client/surface.h>
 #include <KWayland/Client/textinput.h>
 
+// Image copy capture proxy classes
+#include "../wayland/client/imagecopyproxies.h"
+
 // screenlocker
 #if KWIN_BUILD_SCREENLOCKER
 #include <KScreenLocker/KsldApp>
@@ -585,6 +588,20 @@ std::unique_ptr<Connection> Connection::setup(AdditionalWaylandInterfaces flags)
         if (flags.testFlag(AdditionalWaylandInterface::Seat) && interface == wl_seat_interface.name) {
             c->kwinSeat = std::make_unique<WlSeat>(*c->registry, name, version);
         }
+        if (flags & AdditionalWaylandInterface::ImageCopyCaptureV1) {
+            if (interface == ImageCopyCaptureClient::CaptureManager::interfaceName()) {
+                c->imageCopyCaptureManager = std::make_unique<ImageCopyCaptureClient::CaptureManager>();
+                c->imageCopyCaptureManager->setup(*c->registry, name, version);
+                c->imageCopyCaptureManager->setEventQueue(c->registry->eventQueue());
+            }
+        }
+        if (flags & AdditionalWaylandInterface::ImageCaptureSourceV1) {
+            if (interface == ImageCopyCaptureClient::OutputSourceManager::interfaceName()) {
+                c->imageCaptureSourceManager = std::make_unique<ImageCopyCaptureClient::OutputSourceManager>();
+                c->imageCaptureSourceManager->setup(*c->registry, name, version);
+                c->imageCaptureSourceManager->setEventQueue(c->registry->eventQueue());
+            }
+        }
     });
 
     QSignalSpy allAnnounced(registry, &KWayland::Client::Registry::interfacesAnnounced);
@@ -734,6 +751,8 @@ Connection::~Connection()
     viewporter.reset();
     alphaModifier.reset();
     kwinSeat.reset();
+    imageCopyCaptureManager.reset();
+    imageCaptureSourceManager.reset();
 
     delete queue; // Must be destroyed last
     queue = nullptr;
@@ -956,6 +975,16 @@ AlphaModifierV1 *alphaModifier()
 WaylandClient::Viewporter *viewporter()
 {
     return s_waylandConnection->viewporter.get();
+}
+
+ImageCopyCaptureClient::CaptureManager *imageCopyCaptureManager()
+{
+    return s_waylandConnection->imageCopyCaptureManager.get();
+}
+
+ImageCopyCaptureClient::OutputSourceManager *imageCaptureSourceManager()
+{
+    return s_waylandConnection->imageCaptureSourceManager.get();
 }
 
 bool waitForWaylandSurface(Window *window)

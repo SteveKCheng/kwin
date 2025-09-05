@@ -93,6 +93,13 @@ class zwp_text_input_manager_v3;
 
 class ScreencastingV1;
 
+// Forward declarations for ImageCopyCapture classes
+namespace ImageCopyCaptureClient
+{
+class CaptureManager;
+class OutputSourceManager;
+}
+
 namespace KWin
 {
 
@@ -828,6 +835,8 @@ enum class AdditionalWaylandInterface : uint64_t {
     ColorRepresentation = 1ull << 32,
     Viewporter = 1ull << 33,
     AlphaModifierV1 = 1ull << 34,
+    ImageCopyCaptureV1 = 1ull << 35,
+    ImageCaptureSourceV1 = 1ull << 36,
 };
 Q_DECLARE_FLAGS(AdditionalWaylandInterfaces, AdditionalWaylandInterface)
 
@@ -1208,6 +1217,8 @@ struct Connection
     std::unique_ptr<AlphaModifierV1> alphaModifier;
     // TODO port everything away from KWayland::Client::Seat
     std::unique_ptr<WlSeat> kwinSeat;
+    std::unique_ptr<ImageCopyCaptureClient::CaptureManager> imageCopyCaptureManager;
+    std::unique_ptr<ImageCopyCaptureClient::OutputSourceManager> imageCaptureSourceManager;
 };
 
 void keyboardKeyPressed(quint32 key, quint32 time);
@@ -1287,6 +1298,8 @@ WaylandClient::LinuxDmabufV1 *linuxDmabuf();
 ColorRepresentationV1 *colorRepresentation();
 WaylandClient::Viewporter *viewporter();
 AlphaModifierV1 *alphaModifier();
+ImageCopyCaptureClient::CaptureManager *imageCopyCaptureManager();
+ImageCopyCaptureClient::OutputSourceManager *imageCaptureSourceManager();
 
 bool waitForWaylandSurface(Window *window);
 

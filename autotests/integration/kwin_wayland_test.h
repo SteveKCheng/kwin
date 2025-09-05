@@ -72,6 +72,13 @@ class zwp_text_input_manager_v3;
 
 class ScreencastingV1;
 
+// Forward declarations for ImageCopyCapture classes
+namespace ImageCopyCaptureClient
+{
+class CaptureManager;
+class OutputSourceManager;
+}
+
 namespace KWin
 {
 
@@ -611,6 +618,8 @@ enum class AdditionalWaylandInterface {
     ColorManagement = 1 << 22,
     FifoV1 = 1 << 23,
     PresentationTime = 1 << 24,
+    ImageCopyCaptureV1 = 1 << 25,
+    ImageCaptureSourceV1 = 1 << 26,
 };
 Q_DECLARE_FLAGS(AdditionalWaylandInterfaces, AdditionalWaylandInterface)
 
@@ -757,6 +766,8 @@ struct Connection
     std::unique_ptr<ColorManagerV1> colorManager;
     std::unique_ptr<FifoManagerV1> fifoManager;
     std::unique_ptr<PresentationTime> presentationTime;
+    std::unique_ptr<ImageCopyCaptureClient::CaptureManager> imageCopyCaptureManager;
+    std::unique_ptr<ImageCopyCaptureClient::OutputSourceManager> imageCaptureSourceManager;
 };
 
 void keyboardKeyPressed(quint32 key, quint32 time);
@@ -820,6 +831,8 @@ SecurityContextManagerV1 *waylandSecurityContextManagerV1();
 ColorManagerV1 *colorManager();
 FifoManagerV1 *fifoManager();
 PresentationTime *presentationTime();
+ImageCopyCaptureClient::CaptureManager *imageCopyCaptureManager();
+ImageCopyCaptureClient::OutputSourceManager *imageCaptureSourceManager();
 
 bool waitForWaylandSurface(Window *window);
 

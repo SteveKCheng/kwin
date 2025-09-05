@@ -15,6 +15,9 @@ qt6_generate_wayland_protocol_client_sources(KWinIntegrationTestFramework
     ${private_code_option}
     FILES
         ${CMAKE_SOURCE_DIR}/src/wayland/protocols/wlr-layer-shell-unstable-v1.xml
+        ${CMAKE_SOURCE_DIR}/src/wayland/protocols/ext-image-copy-capture-v1.xml
+        ${CMAKE_SOURCE_DIR}/src/wayland/protocols/ext-image-capture-source-v1.xml
+
         ${WaylandProtocols_DATADIR}/stable/presentation-time/presentation-time.xml
         ${WaylandProtocols_DATADIR}/stable/xdg-shell/xdg-shell.xml
         ${WaylandProtocols_DATADIR}/staging/color-management/color-management-v1.xml
@@ -38,6 +41,7 @@ target_sources(KWinIntegrationTestFramework PRIVATE
     generic_scene_opengl_test.cpp
     kwin_wayland_test.cpp
     test_helpers.cpp
+    ../wayland/client/imagecopyproxies.cpp  # for image-copy-capture proxies in test_helpers.cpp
 )
 target_link_libraries(KWinIntegrationTestFramework
     PUBLIC

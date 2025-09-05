@@ -206,6 +206,8 @@ if (TARGET K::KPipeWire)
     integrationTest(NAME testScreencasting SRCS screencasting_test.cpp LIBS K::KPipeWire)
 endif()
 
+integrationTest(NAME testImageCopyCaptureIntegration SRCS imagecopycapture_test.cpp)
+
 if (KWIN_BUILD_ACTIVITIES)
     integrationTest(NAME testActivities SRCS activities_test.cpp LIBS XCB::ICCCM Plasma::Activities)
 endif()

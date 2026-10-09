@@ -15,7 +15,7 @@ namespace KWin
 {
 
 class Display;
-class Output;
+class LogicalOutput;
 class ImageCaptureSourceV1InterfacePrivate;
 class OutputImageCaptureSourceManagerV1InterfacePrivate;
 
@@ -24,7 +24,7 @@ class OutputImageCaptureSourceManagerV1InterfacePrivate;
  *
  * This is a concrete class that wraps the @c ext_image_capture_source_v1 interface.
  *
- * As the current implementation only supports capturing Output (@c wl_output),
+ * As the current implementation only supports capturing LogicalOutput (@c wl_output),
  * this general representation of a capture source is only used during the
  * internal operation of @c OutputImageCaptureSourceManagerV1Interface,
  * but that could change.
@@ -52,7 +52,7 @@ public:
     /**
      * @brief Get the output if this is an output source, nullptr otherwise.
      */
-    Output *output() const;
+    LogicalOutput *output() const;
 
     /**
      * @brief Get ImageCaptureSourceV1Interface instance from wl_resource.

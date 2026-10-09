@@ -40,7 +40,7 @@ class TestImageCopyCaptureSession : public KWin::ImageCopyCaptureSessionV1Interf
 public:
     explicit TestImageCopyCaptureSession(wl_resource *resource,
                                          KWin::ImageCopyCaptureManagerV1Interface *manager,
-                                         KWin::Output *output,
+                                         KWin::LogicalOutput *output,
                                          bool overlayCursor)
         : KWin::ImageCopyCaptureSessionV1Interface(resource, manager)
         , m_output(output)
@@ -76,7 +76,7 @@ protected:
     }
 
 public:
-    KWin::Output *output() const
+    KWin::LogicalOutput *output() const
     {
         return m_output.get();
     }
@@ -94,7 +94,7 @@ Q_SIGNALS:
     void clientBufferDamaged(const QRect &damage);
 
 private:
-    QPointer<KWin::Output> m_output;
+    QPointer<KWin::LogicalOutput> m_output;
     bool m_overlayCursor;
     QVector<QRect> m_clientBufferDamage;
 };
@@ -114,7 +114,7 @@ public:
 
 protected:
     KWin::ImageCopyCaptureSessionV1Interface *createSession(wl_resource *resource,
-                                                            KWin::Output *output,
+                                                            KWin::LogicalOutput *output,
                                                             bool overlayCursor) override
     {
         auto *session = new TestImageCopyCaptureSession(resource, this, output, overlayCursor);
@@ -130,7 +130,7 @@ public:
     }
 
 Q_SIGNALS:
-    void sessionCreated(KWin::Output *output, bool overlayCursor);
+    void sessionCreated(KWin::LogicalOutput *output, bool overlayCursor);
 
 private:
     QVector<TestImageCopyCaptureSession *> m_sessions;
@@ -172,7 +172,7 @@ private:
     std::unique_ptr<KWayland::Client::EventQueue> m_queue;
     std::unique_ptr<KWayland::Client::Registry> m_registry;
 
-    std::unique_ptr<KWayland::Client::Output> m_clientOutput;
+    std::unique_ptr<KWayland::Client::LogicalOutput> m_clientOutput;
     std::unique_ptr<KWayland::Client::ShmPool> m_clientShmPool;
     std::unique_ptr<ImageCopyCaptureClient::OutputSourceManager> m_captureSourceClient;
     std::unique_ptr<ImageCopyCaptureClient::CaptureManager> m_copyCaptureClient;

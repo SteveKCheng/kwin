@@ -269,7 +269,7 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
         return;
     }
 
-    Output *output = sourceInterface->output();
+    LogicalOutput *output = sourceInterface->output();
     if (!output) {
         wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "source has no valid output");
         return;

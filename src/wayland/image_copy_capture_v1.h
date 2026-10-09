@@ -15,7 +15,7 @@ namespace KWin
 {
 
 class Display;
-class Output;
+class LogicalOutput;
 class ImageCopyCaptureManagerV1InterfacePrivate;
 class ImageCopyCaptureSessionV1InterfacePrivate;
 class ImageCopyCaptureFrameV1InterfacePrivate;
@@ -70,7 +70,7 @@ protected:
      * @return Newly instantiated session object, or null on failure
      */
     virtual ImageCopyCaptureSessionV1Interface *createSession(wl_resource *resource,
-                                                              Output *output,
+                                                              LogicalOutput *output,
                                                               bool overlayCursor) = 0;
 
 private:

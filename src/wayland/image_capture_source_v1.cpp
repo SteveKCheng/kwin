@@ -30,7 +30,7 @@ public:
     ImageCaptureSourceV1Interface *const m_parent;
 
     ImageCaptureSourceV1Interface::SourceType m_sourceType;
-    QPointer<Output> m_output; // Only valid for output sources
+    QPointer<LogicalOutput> m_output; // Only valid for output sources
 
 protected:
     void ext_image_capture_source_v1_destroy_resource(Resource *resource) override
@@ -115,7 +115,7 @@ ImageCaptureSourceV1Interface::SourceType ImageCaptureSourceV1Interface::sourceT
     return d->m_sourceType;
 }
 
-Output *ImageCaptureSourceV1Interface::output() const
+LogicalOutput *ImageCaptureSourceV1Interface::output() const
 {
     return d->m_output.get();
 }

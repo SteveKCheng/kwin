@@ -40,7 +40,7 @@ class ImageCopyCaptureSessionImpl final : public ImageCopyCaptureSessionV1Interf
 public:
     ImageCopyCaptureSessionImpl(wl_resource *resource,
                                 ImageCopyCaptureManagerV1Interface *manager,
-                                Output *output,
+                                LogicalOutput *output,
                                 bool overlayCursor);
 
 protected:
@@ -62,7 +62,7 @@ private:
      *
      * Part of the parameters set by the client.
      */
-    const QPointer<Output> m_output;
+    const QPointer<LogicalOutput> m_output;
 
     /**
      * @brief Whether the cursor should be rendered as part of the frame.
@@ -88,7 +88,7 @@ private:
     QRect m_bufferDamage;
 
     /**
-     * @brief The cumulative region of the Output that has changed since the
+     * @brief The cumulative region of the LogicalOutput that has changed since the
      *        last "ready" event was fired.
      *
      * This region is expressed in physical (scaled) coordinates.
@@ -149,15 +149,15 @@ private:
      *                 or it is not of the correct format.
      * @param clipBox  The rectangle to re-paint in the frame's buffer.
      *                 Areas outside will remain unchanged.
-     *                 This box will naturally be clipped against the Output's area.
+     *                 This box will naturally be clipped against the LogicalOutput's area.
      * @param cursorBox  The rectangle containing the cursor to overlay
-     *                   onto the Output's contents.  The cursor image will
-     *                   also be implicitly clipped against the Output's area
+     *                   onto the LogicalOutput's contents.  The cursor image will
+     *                   also be implicitly clipped against the LogicalOutput's area
      *                   and also @a clipBox.
      *
      * @return True if rendering was successful. False if the frame has been marked
      *         has failed, or an update should not be sent out because
-     *         there is no damage within the Output's area.
+     *         there is no damage within the LogicalOutput's area.
      */
     bool renderFrame(ImageCopyCaptureFrameV1Interface &frame,
                      const QRect &clipBox,
@@ -182,7 +182,7 @@ private:
 
 ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource *resource,
                                                          ImageCopyCaptureManagerV1Interface *manager,
-                                                         Output *output,
+                                                         LogicalOutput *output,
                                                          bool overlayCursor)
     : ImageCopyCaptureSessionV1Interface(resource, manager)
     , m_output(output)
@@ -191,10 +191,10 @@ ImageCopyCaptureSessionImpl::ImageCopyCaptureSessionImpl(wl_resource *resource,
     // All output contents are damaged at start
     damageWholeFrame();
 
-    connect(output, &Output::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputDamage);
-    connect(output, &Output::geometryChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
-    connect(output, &Output::scaleChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
-    connect(output, &Output::destroyed, this, &ImageCopyCaptureSessionImpl::handleOutputDestroyed);
+    connect(output, &LogicalOutput::outputChange, this, &ImageCopyCaptureSessionImpl::handleOutputDamage);
+    connect(output, &LogicalOutput::geometryChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
+    connect(output, &LogicalOutput::scaleChanged, this, &ImageCopyCaptureSessionImpl::handleOutputSizeChange);
+    connect(output, &LogicalOutput::destroyed, this, &ImageCopyCaptureSessionImpl::handleOutputDestroyed);
 
     if (overlayCursor) {
         auto *cursors = Cursors::self();
@@ -279,7 +279,7 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
                                               const QRect &clipBox,
                                               const QRectF &cursorBox)
 {
-    Output *output = m_output.get();
+    LogicalOutput *output = m_output.get();
     Q_ASSERT(output != nullptr);
 
     auto outputSize = output->pixelSize();
@@ -287,8 +287,8 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
     // Ensure pointer arithmetic below does not go out of bounds
     auto inBoundsClipBox = clipBox.intersected(QRect(QPoint(), outputSize));
 
-    // An empty inBoundsClipBox can happen if the cursor is entirely off the screen (Output).
-    // sendFrameUpdatesIfAny relies on this method to clip to the Output's area.
+    // An empty inBoundsClipBox can happen if the cursor is entirely off the screen (LogicalOutput).
+    // sendFrameUpdatesIfAny relies on this method to clip to the LogicalOutput's area.
     // In this case, we should not send an update at all and keep waiting for additional
     // damage.  We return false so sendFrameUpdatesIfAny does not mark the frame
     // as ready, although this case is clearly not a failure.
@@ -376,7 +376,7 @@ bool ImageCopyCaptureSessionImpl::renderFrame(ImageCopyCaptureFrameV1Interface &
 
 QRectF ImageCopyCaptureSessionImpl::getCursorBox() const
 {
-    Output *output = m_output.get();
+    LogicalOutput *output = m_output.get();
     Q_ASSERT(output != nullptr);
 
     if (!m_cursorHasChanged) {
@@ -409,9 +409,9 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     }
 
     // Fail if output has already gone away.
-    Output *output = m_output.get();
+    LogicalOutput *output = m_output.get();
     if (output == nullptr) {
-        qDebug() << "Output has gone away while a frame is being captured";
+        qDebug() << "LogicalOutput has gone away while a frame is being captured";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
         return;
     }
@@ -485,7 +485,7 @@ public:
 
 protected:
     ImageCopyCaptureSessionV1Interface *createSession(wl_resource *resource,
-                                                      Output *output,
+                                                      LogicalOutput *output,
                                                       bool overlayCursor) override
     {
         return new ImageCopyCaptureSessionImpl(resource, this, output, overlayCursor);

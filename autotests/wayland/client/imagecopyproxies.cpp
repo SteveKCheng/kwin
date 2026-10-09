@@ -88,7 +88,7 @@ std::unique_ptr<CaptureSession> CaptureManager::createSession(const CaptureSourc
     uint32_t options = paintCursors ? QtWayland::ext_image_copy_capture_manager_v1::options_paint_cursors : 0;
     auto *sessionResource = d->create_session(source.resource(), options);
 
-    auto session = std::make_unique<CaptureSession>(this);
+    auto session = std::make_unique<CaptureSession>();
     session->setup(sessionResource);
 
     return session;
@@ -391,7 +391,7 @@ std::unique_ptr<CaptureFrame> CaptureSession::createFrame()
 
     auto *frameResource = d->create_frame();
 
-    auto frame = std::make_unique<CaptureFrame>(this);
+    auto frame = std::make_unique<CaptureFrame>();
     frame->setup(frameResource);
 
     return frame;

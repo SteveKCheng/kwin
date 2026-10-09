@@ -9,6 +9,7 @@
 
 #include <drm_fourcc.h>
 
+#include "imagecopycapture_logging.h"
 #include "imagecopycaptureplugin.h"
 #include "outputrenderer.h"
 #include "rendertexture.h"
@@ -311,7 +312,7 @@ bool ImageCopyCaptureSessionImpl::copyToFrame(ImageCopyCaptureFrameV1Interface &
     //      See src/wayland/shmclientbuffer.cpp.
     const ShmAttributes *bufferAttributes = clientBuffer->shmAttributes();
     if (!(bufferAttributes->format == DRM_FORMAT_ARGB8888 && bufferAttributes->size == outputSize && (bufferAttributes->stride % 4) == 0 && (bufferAttributes->stride / 4) >= outputSize.width())) {
-        qWarning() << "Buffer passed for image copy capture has the wrong format; failing the request";
+        qCWarning(KWIN_IMAGECOPYCAPTURE) << "Buffer passed for image copy capture has the wrong format; failing the request";
         frame.sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::buffer_constraints);
         return false;
     }
@@ -377,7 +378,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // Fail if output has already gone away.
     LogicalOutput *output = m_output.get();
     if (output == nullptr) {
-        qDebug() << "Output has gone away while a frame is being captured";
+        qCDebug(KWIN_IMAGECOPYCAPTURE) << "Output has gone away while a frame is being captured";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
         return;
     }
@@ -385,6 +386,7 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // Skip cheaply if nothing has changed since the last frame (the common case when
     // the scene reports damage that turns out to be outside this output).
     if (m_renderer && !m_renderer->hasPendingChanges() && m_textureRepair.isEmpty() && m_pendingDamage.isEmpty()) {
+        qCDebug(KWIN_IMAGECOPYCAPTURE) << "Frame pending, nothing changed yet";
         return;
     }
 
@@ -392,13 +394,13 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // when we are called in response to a request from the Wayland client.
     auto *backend = qobject_cast<EglBackend *>(Compositor::self()->backend());
     if (!backend || !backend->openglContext()->makeCurrent()) {
-        qWarning() << "No OpenGL context available for image copy capture";
+        qCWarning(KWIN_IMAGECOPYCAPTURE) << "No OpenGL context available for image copy capture";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return;
     }
 
     if (!ensureRenderResources()) {
-        qWarning() << "Image copy capture requires OpenGL compositing";
+        qCWarning(KWIN_IMAGECOPYCAPTURE) << "Image copy capture requires OpenGL compositing";
         frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
         return;
     }
@@ -407,9 +409,11 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     if (m_renderer->hasPendingChanges() || !m_textureRepair.isEmpty()) {
         const auto painted = m_renderer->render(m_framebuffer.get(), m_textureRepair);
         if (!painted) {
+            qCWarning(KWIN_IMAGECOPYCAPTURE) << "Rendering the output failed";
             frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::unknown);
             return;
         }
+        qCDebug(KWIN_IMAGECOPYCAPTURE) << "Rendered output" << output->name() << "painted" << painted->boundingRect() << "repair was" << m_textureRepair.boundingRect();
         m_textureRepair = Region();
         m_pendingDamage |= *painted;
     }
@@ -417,12 +421,14 @@ void ImageCopyCaptureSessionImpl::sendFrameUpdatesIfAny()
     // Skip if there are no updates (yet).  The first frame of a session always has
     // the whole output as pending damage, so it is sent immediately.
     if (m_pendingDamage.isEmpty()) {
+        qCDebug(KWIN_IMAGECOPYCAPTURE) << "Frame pending, no visible change after rendering";
         return;
     }
 
     // Copy everything that is new to us, plus what the client said is stale in its buffer.
     const Rect wholeArea(QPoint(), output->pixelSize());
     const QRect clipBox = (m_pendingDamage.boundingRect() | Rect(m_bufferDamage)) & wholeArea;
+    qCDebug(KWIN_IMAGECOPYCAPTURE) << "Copying" << clipBox << "to client; pending damage" << m_pendingDamage.boundingRect() << "client buffer damage" << m_bufferDamage;
     if (clipBox.isEmpty()) {
         return;
     }
@@ -461,6 +467,7 @@ void ImageCopyCaptureSessionImpl::frameDestroyed()
 
 void ImageCopyCaptureSessionImpl::captureFrame()
 {
+    qCDebug(KWIN_IMAGECOPYCAPTURE) << "Capture requested for output" << (m_output ? m_output->name() : QStringLiteral("<gone>"));
     // Send updates immediately if there are any
     sendFrameUpdatesIfAny();
 }

@@ -8,9 +8,12 @@
 */
 #include "compositor.h"
 #include "core/output.h"
+#include "core/outputbackend.h"
+#include "core/outputconfiguration.h"
 #include "cursor.h"
 #include "generic_scene_opengl_test.h"
 #include "input.h"
+#include "main.h"
 #include "pointer_input.h"
 #include "wayland/surface.h"
 #include "window.h"
@@ -25,6 +28,7 @@
 
 #include <QElapsedTimer>
 #include <QPainter>
+#include <QTestEventLoop>
 
 #include "wayland-ext-image-copy-capture-v1-client-protocol.h"
 #include <wayland-client-protocol.h>
@@ -208,8 +212,22 @@ private:
     /// Replace (part of) the window's contents and wait until the compositor has taken the commit.
     void updateWindow(Window *window, const QImage &image, const QRect &damage);
 
+    /**
+     * Run the event loop until @a condition holds or @a timeout ms have passed.
+     *
+     * Unlike QTRY_* / QTest::qWait, this blocks in the event loop, which is what makes
+     * kwin flush its pending events to the client.
+     */
+    static bool waitUntil(const std::function<bool()> &condition, int timeout = 5000);
+
+    /// (Re-)collect the client-side outputs, wait for their geometry, and sort them left to right.
+    void refreshOutputs();
+
     std::unique_ptr<KWayland::Client::Surface> m_surface;
     std::unique_ptr<Test::XdgToplevel> m_shellSurface;
+
+    /// The client-side outputs, sorted left to right.
+    QList<KWayland::Client::Output *> m_outputs;
 };
 
 void ImageCopyCaptureTest::init()
@@ -221,6 +239,11 @@ void ImageCopyCaptureTest::init()
     QVERIFY(Test::imageCaptureSourceManager());
     QVERIFY(Test::waylandSeat());
 
+    refreshOutputs();
+    QCOMPARE(m_outputs.size(), 2);
+    QCOMPARE(m_outputs[0]->globalPosition(), QPoint(0, 0));
+    QCOMPARE(m_outputs[1]->globalPosition(), QPoint(1280, 0));
+
     // Keep the cursor out of the picture unless a test wants it.
     Cursors::self()->hideCursor();
     input()->pointer()->warp(QPointF(1000, 1000));
@@ -230,6 +253,7 @@ void ImageCopyCaptureTest::cleanup()
 {
     m_shellSurface.reset();
     m_surface.reset();
+    m_outputs.clear();
     Cursors::self()->showCursor();
 
     // Restore the output layout in case a test changed it
@@ -290,11 +314,14 @@ CaptureResult ImageCopyCaptureTest::capture(CaptureSession *session, const Clien
     QSignalSpy failedSpy(frame.get(), &CaptureFrame::failed);
     frame->capture();
 
-    // Wait for either event (or the timeout, for tests expecting no frame)
+    // Wait for either event (or the timeout, for tests expecting no frame).
+    // N.B. The wait must actually block in the event loop: kwin flushes events to
+    // clients only when the loop is about to block, so QTest::qWait() would never
+    // deliver the ready event.
     QElapsedTimer timer;
     timer.start();
     while (readySpy.isEmpty() && failedSpy.isEmpty() && timer.elapsed() < timeout) {
-        QTest::qWait(10);
+        readySpy.wait(qMin<qint64>(100, timeout - timer.elapsed()));
     }
 
     result.ready = frame->isReady();
@@ -327,6 +354,38 @@ Window *ImageCopyCaptureTest::showFullScreenWindow(KWayland::Client::Output *out
     return window;
 }
 
+bool ImageCopyCaptureTest::waitUntil(const std::function<bool()> &condition, int timeout)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!condition()) {
+        if (timer.elapsed() >= timeout) {
+            return false;
+        }
+        QTestEventLoop::instance().enterLoopMSecs(50);
+    }
+    return true;
+}
+
+void ImageCopyCaptureTest::refreshOutputs()
+{
+    // The client-side output objects receive their geometry asynchronously;
+    // wait until there are two outputs and every one knows its size and position.
+    // If the outputs were recreated, also wait until the stale ones are gone.
+    // Their order in the registry is not stable, so sort them left to right.
+    const QList<KWayland::Client::Output *> stale = m_outputs;
+    QVERIFY(waitUntil([&stale]() {
+        const auto outputs = Test::waylandOutputs();
+        return outputs.size() == 2 && std::ranges::all_of(outputs, [&stale](KWayland::Client::Output *o) {
+            return !stale.contains(o) && !o->pixelSize().isEmpty();
+        });
+    }));
+    m_outputs = Test::waylandOutputs();
+    std::sort(m_outputs.begin(), m_outputs.end(), [](KWayland::Client::Output *a, KWayland::Client::Output *b) {
+        return a->globalPosition().x() < b->globalPosition().x();
+    });
+}
+
 void ImageCopyCaptureTest::updateWindow(Window *window, const QImage &image, const QRect &damage)
 {
     QSignalSpy committedSpy(window->surface(), &SurfaceInterface::committed);
@@ -343,7 +402,7 @@ void ImageCopyCaptureTest::updateWindow(Window *window, const QImage &image, con
 void ImageCopyCaptureTest::testOutputCapture()
 {
     // The most basic case: one full capture of an output showing a known pattern.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     QVERIFY(outputs.size() >= 2);
     auto *output = outputs[0];
 
@@ -375,7 +434,7 @@ void ImageCopyCaptureTest::testSecondOutput()
 {
     // Capturing an output that does not sit at the origin must not pick up
     // the other output's contents or offset the picture.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     QVERIFY(outputs.size() >= 2);
     auto *output = outputs[1];
     QVERIFY(output->globalPosition() != QPoint(0, 0));
@@ -398,7 +457,7 @@ void ImageCopyCaptureTest::testSecondOutput()
 void ImageCopyCaptureTest::testPartialUpdate()
 {
     // After the first frame, only what changed on screen is copied and reported.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     QImage pattern = makeTestPattern(output->pixelSize());
@@ -439,7 +498,7 @@ void ImageCopyCaptureTest::testClientBufferDamage()
 {
     // A client handing in a buffer with stale contents must get those parts
     // refreshed even if nothing changed on screen there.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     QImage pattern = makeTestPattern(output->pixelSize());
@@ -499,7 +558,7 @@ void ImageCopyCaptureTest::testClientBufferDamage()
 void ImageCopyCaptureTest::testNoChangesNoFrame()
 {
     // When nothing changes on screen, a capture request stays pending until something does.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     QImage pattern = makeTestPattern(output->pixelSize());
@@ -542,7 +601,7 @@ void ImageCopyCaptureTest::testCursorOverlay()
 {
     // With paint_cursors, the cursor is composited into the frame; without, it is not.
     // Moving the cursor produces damage at both its old and new positions.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     const QImage pattern = makeTestPattern(output->pixelSize());
@@ -568,7 +627,8 @@ void ImageCopyCaptureTest::testCursorOverlay()
     cursorSurface->commit();
     pointer->setCursor(cursorSurface.get(), QPoint(0, 0));
     QVERIFY(cursorRenderedSpy.wait());
-    QTRY_COMPARE(kwinApp()->cursorImage().image(), cursorImage);
+    QTRY_COMPARE(kwinApp()->cursorImage().image().size(), cursorSize);
+    QVERIFY(isSolidColor(kwinApp()->cursorImage().image(), QRect(QPoint(), cursorSize), Qt::red));
 
     const QRect cursorRect(cursorPos, cursorSize);
 
@@ -614,7 +674,7 @@ void ImageCopyCaptureTest::testBufferConstraints()
 {
     // Buffers that do not satisfy the advertised constraints fail the frame
     // with buffer_constraints, and the session keeps working afterwards.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     const QImage pattern = makeTestPattern(output->pixelSize());
@@ -657,10 +717,25 @@ void ImageCopyCaptureTest::testBufferConstraints()
 
 void ImageCopyCaptureTest::testOutputScaleChange()
 {
-    // Changing the output's scale changes its pixel size: the session re-advertises
-    // constraints, old-size buffers are rejected, new-size buffers work.
-    auto outputs = Test::waylandOutputs();
+    // Changing the output's mode and scale changes its pixel size: the session
+    // re-advertises constraints, old-size buffers are rejected, new-size buffers work.
+
+    // Give the first output a second mode to switch to.  (Test::setOutputConfig
+    // recreates the outputs, so this has to happen before the session exists.)
+    Test::setOutputConfig({
+        Test::OutputInfo{
+            .geometry = Rect(0, 0, 1280, 1024),
+            .modes = {
+                OutputModeline(QSize(1280, 1024), 60000, OutputModeline::Flag::Preferred),
+                OutputModeline(QSize(1920, 1080), 60000),
+            },
+        },
+        Test::OutputInfo{.geometry = Rect(1280, 0, 1280, 1024)},
+    });
+    refreshOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
+    QCOMPARE(output->pixelSize(), QSize(1280, 1024));
 
     const QImage pattern = makeTestPattern(output->pixelSize());
     QVERIFY(showFullScreenWindow(output, pattern));
@@ -668,18 +743,27 @@ void ImageCopyCaptureTest::testOutputScaleChange()
     auto session = createSession(output);
     QVERIFY(session);
     const QSize oldSize = session->bufferSize();
+    QCOMPARE(oldSize, QSize(1280, 1024));
 
     ClientBuffer oldBuffer = createBuffer(oldSize);
     QVERIFY(capture(session.get(), oldBuffer).ready);
 
+    // Switch the same output to 1920x1080 at scale 2, as a display settings change would.
     QSignalSpy constraintsSpy(session.get(), &CaptureSession::constraintsReady);
-    Test::setOutputConfig({
-        Test::OutputInfo{.geometry = Rect(0, 0, 1280, 1024), .scale = 2},
-        Test::OutputInfo{.geometry = Rect(1280, 0, 1280, 1024)},
-    });
+    QSignalSpy stoppedSpy(session.get(), &CaptureSession::stopped);
+    {
+        OutputConfiguration config;
+        auto changeSet = config.changeSet(kwinApp()->outputBackend()->outputs()[0]);
+        changeSet->currentMode = OutputModeline(QSize(1920, 1080), 60000);
+        changeSet->desiredMode = OutputModeline(QSize(1920, 1080), 60000);
+        changeSet->scale = 2;
+        changeSet->scaleSetting = 2;
+        QCOMPARE(workspace()->applyOutputConfiguration(config), OutputConfigurationError::None);
+    }
     QVERIFY(constraintsSpy.count() > 0 || constraintsSpy.wait());
+    QVERIFY(stoppedSpy.isEmpty());
     const QSize newSize = session->bufferSize();
-    QCOMPARE(newSize, workspace()->outputs()[0]->pixelSize());
+    QCOMPARE(newSize, QSize(1920, 1080));
     QVERIFY(newSize != oldSize);
 
     // The old buffer no longer fits
@@ -701,7 +785,7 @@ void ImageCopyCaptureTest::testOutputScaleChange()
 void ImageCopyCaptureTest::testOutputRemoved()
 {
     // Removing the captured output stops the session and fails a pending frame.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     QVERIFY(outputs.size() >= 2);
     auto *output = outputs[1];
 
@@ -737,7 +821,7 @@ void ImageCopyCaptureTest::testOutputRemoved()
 void ImageCopyCaptureTest::testMultipleSessions()
 {
     // Several sessions, on the same and on different outputs, are independent.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     QVERIFY(outputs.size() >= 2);
 
     const QImage pattern = makeTestPattern(outputs[0]->pixelSize());
@@ -797,7 +881,7 @@ void ImageCopyCaptureTest::testFrameDestroyedWhilePending()
 {
     // Destroying a frame that is waiting for changes must not disturb the session;
     // a later frame still gets the changes.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     QImage pattern = makeTestPattern(output->pixelSize());
@@ -835,7 +919,7 @@ void ImageCopyCaptureTest::testSessionDestroyedWithPendingFrame()
 {
     // The protocol allows the session to go away while a frame exists.
     // This must not crash, and the frame can still be destroyed afterwards.
-    auto outputs = Test::waylandOutputs();
+    const auto &outputs = m_outputs;
     auto *output = outputs[0];
 
     const QImage pattern = makeTestPattern(output->pixelSize());

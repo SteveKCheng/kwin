@@ -169,8 +169,9 @@ protected:
             return;
         }
 
-        if (m_session == nullptr) {
-            // Session was destroyed first.  Cannot capture.
+        if (m_session == nullptr || m_session->isStopped()) {
+            // The session was destroyed or has stopped.  Nothing can be captured.
+            m_stage = Stage::Finished;
             send_failed(failure_reason_stopped);
             return;
         }
@@ -234,6 +235,9 @@ public:
      */
     bool m_ownsResource = false;
 
+    /// Whether the stopped event has been sent.  Frames cannot be captured afterwards.
+    bool m_stopped = false;
+
     ImageCopyCaptureFrameV1Interface *getCurrentFrame();
 
 protected:
@@ -251,6 +255,35 @@ protected:
     }
 
     void ext_image_copy_capture_session_v1_create_frame(Resource *resource, uint32_t frame_id) override;
+};
+
+/**
+ * @brief A session that is stopped from the start, for a capture source whose
+ *        output no longer exists.
+ *
+ * It never captures anything: the base class fails every frame with the
+ * @c stopped reason once #sendStopped has been called.
+ */
+class StoppedSession final : public ImageCopyCaptureSessionV1Interface
+{
+public:
+    StoppedSession(wl_resource *resource, ImageCopyCaptureManagerV1Interface *manager)
+        : ImageCopyCaptureSessionV1Interface(resource, manager)
+    {
+    }
+
+protected:
+    void captureFrame() override
+    {
+        // Not reached: the frame checks for a stopped session before calling this.
+        if (auto *frame = getCurrentFrame()) {
+            frame->sendFailed(ImageCopyCaptureFrameV1Interface::FailureReason::stopped);
+        }
+    }
+
+    void damageClientBuffer(const QRect &damage) override
+    {
+    }
 };
 
 //
@@ -272,11 +305,11 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
         return;
     }
 
-    LogicalOutput *output = sourceInterface->output();
-    if (!output) {
-        wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "source has no valid output");
+    if (options & ~uint32_t(options_paint_cursors)) {
+        wl_resource_post_error(resource->handle, error_invalid_option, "invalid options");
         return;
     }
+    const bool overlayCursor = (options & options_paint_cursors) != 0;
 
     wl_resource *sessionResource = wl_resource_create(resource->client(), &ext_image_copy_capture_session_v1_interface, resource->version(), session_id);
     if (!sessionResource) {
@@ -284,9 +317,13 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
         return;
     }
 
-    bool overlayCursor = (options & QtWaylandServer::ext_image_copy_capture_manager_v1::options_paint_cursors) != 0;
-
-    auto *session = m_parent->createSession(sessionResource, output, overlayCursor);
+    // A source whose output has gone away is not a protocol error: the client may
+    // not have learned about the removal yet.  The session is created but stopped
+    // right away, as the protocol prescribes for a source that disappears.
+    LogicalOutput *output = sourceInterface->output();
+    ImageCopyCaptureSessionV1Interface *session = output
+        ? m_parent->createSession(sessionResource, output, overlayCursor)
+        : new StoppedSession(sessionResource, m_parent);
     if (!session) {
         wl_resource_destroy(sessionResource);
         return;
@@ -294,6 +331,10 @@ void ImageCopyCaptureManagerV1InterfacePrivate::ext_image_copy_capture_manager_v
 
     // Pass ownership of sessionResource to new object only after all initialization is successful
     session->d->m_ownsResource = true;
+
+    if (!output) {
+        session->sendStopped();
+    }
 }
 
 ImageCopyCaptureManagerV1Interface::ImageCopyCaptureManagerV1Interface(Display *display, QObject *parent)
@@ -368,7 +409,13 @@ void ImageCopyCaptureSessionV1Interface::sendConstraintsDone()
 
 void ImageCopyCaptureSessionV1Interface::sendStopped()
 {
+    d->m_stopped = true;
     d->send_stopped();
+}
+
+bool ImageCopyCaptureSessionV1Interface::isStopped() const
+{
+    return d->m_stopped;
 }
 
 ImageCopyCaptureFrameV1Interface *ImageCopyCaptureSessionV1Interface::getCurrentFrame() const

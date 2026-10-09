@@ -179,8 +179,16 @@ protected:
 
     /**
      * Send stopped event to indicate the session is no longer available.
+     *
+     * Afterwards, any frame the client asks to capture fails with the
+     * @c stopped reason without #captureFrame being called.
      */
     void sendStopped();
+
+    /**
+     * Whether #sendStopped has been called.
+     */
+    bool isStopped() const;
 
     /**
      * Get the current frame being captured by this session, if any.

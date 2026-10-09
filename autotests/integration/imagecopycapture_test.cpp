@@ -183,6 +183,7 @@ private Q_SLOTS:
     void testBufferConstraints();
     void testOutputScaleChange();
     void testOutputRemoved();
+    void testSessionOnRemovedOutput();
     void testMultipleSessions();
     void testFrameDestroyedWhilePending();
     void testSessionDestroyedWithPendingFrame();
@@ -816,6 +817,57 @@ void ImageCopyCaptureTest::testOutputRemoved()
 
     frame.reset();
     buffer.release();
+}
+
+void ImageCopyCaptureTest::testSessionOnRemovedOutput()
+{
+    // A client may create a session from a source whose output has just been removed,
+    // before it learns about the removal.  That is not a protocol error: the session
+    // is created and stopped right away, and frames on it fail with "stopped".
+    const auto &outputs = m_outputs;
+    QVERIFY(outputs.size() >= 2);
+    const QList<KWayland::Client::Output *> oldOutputs = outputs;
+
+    auto source = Test::imageCaptureSourceManager()->createSource(*outputs[1]);
+    QVERIFY(source && source->isValid());
+    // Make sure the compositor has processed create_source before the output goes
+    Test::flushWaylandConnection();
+    QTestEventLoop::instance().enterLoopMSecs(100);
+
+    Test::setOutputConfig({
+        Rect(0, 0, 1280, 1024),
+    });
+    QVERIFY(waitUntil([&oldOutputs]() {
+        const auto now = Test::waylandOutputs();
+        return now.size() == 1 && !oldOutputs.contains(now.first()) && !now.first()->pixelSize().isEmpty();
+    }));
+
+    auto session = Test::imageCopyCaptureManager()->createSession(*source, false);
+    QVERIFY(session);
+    QSignalSpy stoppedSpy(session.get(), &CaptureSession::stopped);
+    QVERIFY(session->isStopped() || stoppedSpy.wait());
+
+    auto frame = session->createFrame();
+    QVERIFY(frame && frame->isValid());
+    ClientBuffer buffer = createBuffer(QSize(64, 64));
+    frame->attachBuffer(*buffer.buffer.lock());
+    QSignalSpy failedSpy(frame.get(), &CaptureFrame::failed);
+    frame->capture();
+    QVERIFY(failedSpy.count() > 0 || failedSpy.wait());
+    QCOMPARE(frame->failureReason(), uint32_t(EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_STOPPED));
+    frame.reset();
+    buffer.release();
+
+    // The connection survived: a session on the remaining output works normally
+    auto *remaining = Test::waylandOutputs().first();
+    const QImage pattern = makeTestPattern(remaining->pixelSize());
+    QVERIFY(showFullScreenWindow(remaining, pattern));
+    auto session2 = createSession(remaining);
+    QVERIFY(session2);
+    ClientBuffer buffer2 = createBuffer(session2->bufferSize());
+    QVERIFY(capture(session2.get(), buffer2).ready);
+    QVERIFY(sameImageContent(buffer2.image(), pattern));
+    buffer2.release();
 }
 
 void ImageCopyCaptureTest::testMultipleSessions()

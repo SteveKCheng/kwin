@@ -81,11 +81,15 @@ void CaptureManager::setEventQueue(KWayland::Client::EventQueue *queue)
 
 std::unique_ptr<CaptureSession> CaptureManager::createSession(const CaptureSource &source, bool paintCursors)
 {
+    return createSession(source, uint32_t(paintCursors ? QtWayland::ext_image_copy_capture_manager_v1::options_paint_cursors : 0));
+}
+
+std::unique_ptr<CaptureSession> CaptureManager::createSession(const CaptureSource &source, uint32_t options)
+{
     if (!isValid()) {
         return nullptr;
     }
 
-    uint32_t options = paintCursors ? QtWayland::ext_image_copy_capture_manager_v1::options_paint_cursors : 0;
     auto *sessionResource = d->create_session(source.resource(), options);
 
     auto session = std::make_unique<CaptureSession>();

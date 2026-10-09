@@ -41,7 +41,7 @@ public:
      */
     enum class SourceType {
         Output,
-        ForeignToplevel
+        ForeignToplevel,
     };
 
     /**
@@ -51,6 +51,11 @@ public:
 
     /**
      * @brief Get the output if this is an output source, nullptr otherwise.
+     *
+     * Also returns nullptr if the output has been removed since the source was
+     * created, or had been removed already when the client created the source.
+     * Such a source is invalid: capture sessions created from it are stopped
+     * immediately.
      */
     LogicalOutput *output() const;
 

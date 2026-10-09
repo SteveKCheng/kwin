@@ -444,6 +444,7 @@ void TestImageCopyCapture::testProtocolError()
     testProtocolErrorInternal(2);
     testProtocolErrorInternal(3);
     testProtocolErrorInternal(4);
+    testProtocolErrorInternal(5);
 }
 
 void TestImageCopyCapture::testProtocolErrorInternal(int subcase)
@@ -500,6 +501,14 @@ void TestImageCopyCapture::testProtocolErrorInternal(int subcase)
         // error_already_captured
         frame1->attachBuffer(*buffer.lock());
         break;
+
+    case 5: {
+        // error_invalid_option on the manager
+        auto source = m_captureSourceClient->createSource(*m_clientOutput);
+        QVERIFY(source && source->isValid());
+        auto badSession = m_copyCaptureClient->createSession(*source, 0xffu);
+        break;
+    }
     }
 
     QVERIFY(errorSpy.wait());

@@ -73,10 +73,15 @@ protected:
     {
         // Get the OutputInterface from the wl_resource
         OutputInterface *outputInterface = OutputInterface::get(output_resource);
-        if (!outputInterface || !outputInterface->handle()) {
+        if (!outputInterface) {
             wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT, "invalid output");
             return;
         }
+
+        // N.B. The output may already have been removed by the time the client's
+        // request arrives (the client cannot know yet).  That is not a protocol
+        // error: the source is created, but it is "invalid", and any capture
+        // session created from it is stopped right away.
 
         wl_resource *sourceResource = wl_resource_create(resource->client(), &ext_image_capture_source_v1_interface, resource->version(), source_id);
         if (!sourceResource) {

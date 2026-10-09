@@ -23,13 +23,16 @@ struct ext_image_copy_capture_frame_v1;
 
 namespace KWayland::Client
 {
+
 class EventQueue;
 class Output;
 class Buffer;
+
 }
 
 namespace ImageCopyCaptureClient
 {
+
 class CaptureManagerPrivate;
 class OutputSourceManagerPrivate;
 class CaptureSourcePrivate;
@@ -75,6 +78,11 @@ public:
      * @return New capture session object (ownership transferred to caller)
      */
     std::unique_ptr<CaptureSession> createSession(const CaptureSource &source, bool paintCursors = false);
+
+    /**
+     * @brief Create a capture session passing the raw options bitfield (for testing invalid values)
+     */
+    std::unique_ptr<CaptureSession> createSession(const CaptureSource &source, uint32_t options);
 
     /**
      * @brief Destroy the manager (calls protocol destroy)

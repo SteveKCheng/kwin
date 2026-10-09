@@ -5,6 +5,7 @@
 */
 
 #include "image_copy_capture_v1.h"
+#include "core/graphicsbuffer.h"
 #include "display.h"
 #include "image_capture_source_v1.h"
 #include "output.h"
@@ -66,7 +67,8 @@ public:
     {
     }
 
-    QPointer<ShmClientBuffer> m_shmClientBuffer;
+    /// The buffer attached by the client for the current frame, if any.
+    QPointer<GraphicsBuffer> m_clientBuffer;
 
     enum class Stage {
         NotCreated, ///< No current frame
@@ -103,7 +105,7 @@ protected:
     void ext_image_copy_capture_frame_v1_destroy(Resource *resource) override
     {
         m_stage = Stage::NotCreated;
-        m_shmClientBuffer = nullptr;
+        m_clientBuffer = nullptr;
         if (m_session != nullptr) {
             m_session->frameDestroyed();
         }
@@ -119,14 +121,15 @@ protected:
             return;
         }
 
-        auto *shmClientBuffer = ShmClientBuffer::get(buffer);
-        if (!shmClientBuffer) {
-            // For now we only support SHM buffers
-            wl_resource_post_error(resource->handle, error_no_buffer, "only SHM buffers supported");
+        // Any buffer type known to kwin is accepted here; whether the session can
+        // actually capture into it is decided when the capture is requested.
+        GraphicsBuffer *clientBuffer = Display::bufferForResource(buffer);
+        if (!clientBuffer) {
+            wl_resource_post_error(resource->handle, error_no_buffer, "unsupported buffer type");
             return;
         }
 
-        m_shmClientBuffer = shmClientBuffer;
+        m_clientBuffer = clientBuffer;
     }
 
     void ext_image_copy_capture_frame_v1_damage_buffer(Resource *resource,
@@ -161,7 +164,7 @@ protected:
             return;
         }
 
-        if (!m_shmClientBuffer) {
+        if (!m_clientBuffer) {
             wl_resource_post_error(resource->handle, error_no_buffer, "no buffer attached");
             return;
         }
@@ -394,7 +397,13 @@ ImageCopyCaptureFrameV1Interface::~ImageCopyCaptureFrameV1Interface() = default;
 ShmClientBuffer *ImageCopyCaptureFrameV1Interface::getShmClientBuffer()
 {
     Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
-    return d->m_shmClientBuffer.get();
+    return dynamic_cast<ShmClientBuffer *>(d->m_clientBuffer.get());
+}
+
+GraphicsBuffer *ImageCopyCaptureFrameV1Interface::getClientBuffer()
+{
+    Q_ASSERT(d->m_stage == ImageCopyCaptureFrameV1InterfacePrivate::Stage::Capturing);
+    return d->m_clientBuffer.get();
 }
 
 void ImageCopyCaptureFrameV1Interface::sendTransform(uint32_t transform)

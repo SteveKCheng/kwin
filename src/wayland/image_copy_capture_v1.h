@@ -22,6 +22,7 @@ class ImageCopyCaptureFrameV1InterfacePrivate;
 class ImageCopyCaptureFrameV1Interface;
 class ImageCopyCaptureSessionV1Interface;
 class ShmClientBuffer;
+class GraphicsBuffer;
 
 /**
  * @brief The manager object for the Wayland ext-image-copy-capture protocol.
@@ -241,6 +242,15 @@ public:
      * This method must not be called after capturing has finished.
      */
     ShmClientBuffer *getShmClientBuffer();
+
+    /**
+     * @brief Get the buffer attached by the client, whatever its type
+     *        (shared memory, DMA-BUF, ...).
+     *
+     * Same lifetime rules as #getShmClientBuffer.  Returns null if no buffer
+     * is attached or the client destroyed it.
+     */
+    GraphicsBuffer *getClientBuffer();
 
     /**
      * Send transform information to indicate how the buffer contents are oriented.

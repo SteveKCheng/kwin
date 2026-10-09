@@ -10,6 +10,7 @@
 #include <QThread>
 
 // KWin
+#include "core/gpumanager.h"
 #include "wayland/compositor.h"
 #include "wayland/display.h"
 #include "wayland/image_capture_source_v1.h"
@@ -163,7 +164,8 @@ private:
     std::unique_ptr<KWin::Display> m_display;
     KWin::CompositorInterface *m_compositorInterface;
     KWin::OutputInterface *m_outputInterface;
-    std::unique_ptr<FakeOutput> m_output;
+    std::unique_ptr<FakeBackendOutput> m_backendOutput;
+    std::unique_ptr<KWin::LogicalOutput> m_output;
     std::unique_ptr<TestImageCopyCaptureManager> m_copyCaptureManager;
     std::unique_ptr<KWin::OutputImageCaptureSourceManagerV1Interface> m_captureSourceManager;
 
@@ -172,7 +174,7 @@ private:
     std::unique_ptr<KWayland::Client::EventQueue> m_queue;
     std::unique_ptr<KWayland::Client::Registry> m_registry;
 
-    std::unique_ptr<KWayland::Client::LogicalOutput> m_clientOutput;
+    std::unique_ptr<KWayland::Client::Output> m_clientOutput;
     std::unique_ptr<KWayland::Client::ShmPool> m_clientShmPool;
     std::unique_ptr<ImageCopyCaptureClient::OutputSourceManager> m_captureSourceClient;
     std::unique_ptr<ImageCopyCaptureClient::CaptureManager> m_copyCaptureClient;
@@ -204,6 +206,9 @@ void TestImageCopyCapture::initTestCase()
 {
     using namespace KWin;
 
+    // Required by ShmClientBuffer (it tries to wrap shm buffers in udmabufs)
+    GpuManager::s_self = std::make_unique<GpuManager>();
+
     m_display = std::make_unique<KWin::Display>(this);
     m_display->addSocketName(s_socketName);
     m_display->start();
@@ -213,9 +218,10 @@ void TestImageCopyCapture::initTestCase()
     m_compositorInterface = new CompositorInterface(m_display.get(), m_display.get());
 
     // Create a fake output for testing
-    m_output = std::make_unique<FakeOutput>();
-    m_output->setMode(QSize(800, 600), 60000);
-    m_output->setScale(1.0);
+    m_backendOutput = std::make_unique<FakeBackendOutput>();
+    m_backendOutput->setMode(QSize(800, 600), 60000);
+    m_backendOutput->setScale(1.0);
+    m_output = std::make_unique<KWin::LogicalOutput>(m_backendOutput.get());
 
     // Create output interface to expose it to clients
     m_outputInterface = new KWin::OutputInterface(m_display.get(), m_output.get(), this);
@@ -240,8 +246,10 @@ void TestImageCopyCapture::cleanupTestCase()
     m_copyCaptureManager.reset();
     m_captureSourceManager.reset();
     m_output.reset();
+    m_backendOutput.reset();
 
     m_display.reset();
+    KWin::GpuManager::s_self.reset();
 
     // These objects are deleted when the Wayland resource is deleted
     m_compositorInterface = nullptr;
@@ -292,7 +300,7 @@ void TestImageCopyCapture::initClient()
     registry.create(m_connection->display());
     QVERIFY(registry.isValid());
 
-    auto conn1 = connect(&registry, &KWayland::Client::Registry::interfaceAnnounced,
+    auto conn1 = connect(&registry, &KWayland::Client::Registry::interfaceAnnounced, this,
                          [&](const QByteArray &interface, quint32 name, quint32 version) {
         if (interface == ImageCopyCaptureClient::CaptureManager::interfaceName()) {
             Q_ASSERT(!m_copyCaptureClient); // there should not be more than one version
@@ -302,7 +310,7 @@ void TestImageCopyCapture::initClient()
         }
     });
 
-    auto conn2 = connect(&registry, &KWayland::Client::Registry::interfaceAnnounced,
+    auto conn2 = connect(&registry, &KWayland::Client::Registry::interfaceAnnounced, this,
                          [&](const QByteArray &interface, quint32 name, quint32 version) {
         if (interface == ImageCopyCaptureClient::OutputSourceManager::interfaceName()) {
             Q_ASSERT(!m_captureSourceClient); // there should not be more than one version
@@ -314,7 +322,7 @@ void TestImageCopyCapture::initClient()
 
     quint32 outputIfaceNumber = 0;
     quint32 outputIfaceVersion = 0;
-    auto conn3 = connect(&registry, &KWayland::Client::Registry::outputAnnounced,
+    auto conn3 = connect(&registry, &KWayland::Client::Registry::outputAnnounced, this,
                          [&](quint32 name, quint32 version) {
         if (version > outputIfaceVersion) {
             outputIfaceNumber = name;
@@ -325,7 +333,7 @@ void TestImageCopyCapture::initClient()
     // Listen for latest version of SHM interface
     quint32 shmIfaceNumber = 0;
     quint32 shmIfaceVersion = 0;
-    auto conn4 = connect(&registry, &KWayland::Client::Registry::shmAnnounced,
+    auto conn4 = connect(&registry, &KWayland::Client::Registry::shmAnnounced, this,
                          [&](quint32 name, quint32 version) {
         if (version > shmIfaceVersion) {
             shmIfaceNumber = name;

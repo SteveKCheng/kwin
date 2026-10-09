@@ -65,7 +65,7 @@ private Q_SLOTS:
     void testOutputCapture();
 
 private:
-    std::optional<QImage> captureOutput(KWayland::Client::LogicalOutput *output);
+    std::optional<QImage> captureOutput(KWayland::Client::Output *output);
 };
 
 void ImageCopyCaptureTest::init()
@@ -76,7 +76,7 @@ void ImageCopyCaptureTest::init()
     Cursors::self()->hideCursor();
 }
 
-std::optional<QImage> ImageCopyCaptureTest::captureOutput(KWayland::Client::LogicalOutput *output)
+std::optional<QImage> ImageCopyCaptureTest::captureOutput(KWayland::Client::Output *output)
 {
     // Create capture source for the output
     auto captureSource = Test::imageCaptureSourceManager()->createSource(*output);

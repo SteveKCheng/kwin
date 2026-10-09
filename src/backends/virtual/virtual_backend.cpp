@@ -25,6 +25,11 @@ namespace KWin
 
 static std::unique_ptr<RenderDevice> findRenderDevice()
 {
+    // Testing aid: allow forcing a specific DRM node, e.g. a vgem device
+    if (const QByteArray path = qgetenv("KWIN_VIRTUAL_RENDER_DEVICE"); !path.isEmpty()) {
+        return RenderDevice::open(QString::fromUtf8(path));
+    }
+
 #if !HAVE_LIBDRM_FAUX
 #if defined(Q_OS_LINUX)
     // Workaround for libdrm being unaware of faux bus.
